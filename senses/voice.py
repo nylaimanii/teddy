@@ -1,7 +1,11 @@
 """Teddy's ears and mouth. See CONTRACTS.md (senses/, Agent B).
 
-    listen(seconds=5) -> str       # Whisper base on the Mac mic
-    speak(text, mood="warm")       # ElevenLabs, falls back to macOS `say`
+    listen(seconds=5) -> str               # Whisper base on the Mac mic
+    speak(text, mood="warm") -> bytes      # ElevenLabs Matilda (mp3); macOS `say` (wav) if that fails
+
+Audio goes to the iPad page if one is connected: the server calls
+    voice.set_sink(fn)   # fn(audio_bytes, mime, text, mood) -> True if a page took it
+If no sink is set, or it returns False, the Mac plays it.
 
 Mock mode (no mic/speaker): set TEDDY_MOCK=1 or call set_mock(True, audio_file=...).
 In mock mode listen() transcribes the audio file if given, else reads a typed line;
@@ -12,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -26,8 +31,8 @@ except ImportError:
 
 SAMPLE_RATE = 16000
 WHISPER_SIZE = os.getenv("TEDDY_WHISPER", "base")
-# George: warm, gentle storyteller. Override with ELEVENLABS_VOICE_ID in .env.
-VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "XrExE9yKIg1WjnnlVkGX")  # Matilda: warm, friendly
+TTS_MODEL = "eleven_flash_v2_5"
 SAY_VOICE = os.getenv("TEDDY_SAY_VOICE", "")  # e.g. "Samantha"; blank = system default
 
 # mood -> (ElevenLabs stability, style, `say` words-per-minute)
@@ -91,6 +96,15 @@ def listen(seconds=5):
     return transcribe(audio)
 
 
+_sink = None
+
+
+def set_sink(fn):
+    """fn(audio_bytes, mime, text, mood) -> bool. Return True if a page played it; False = Mac plays it."""
+    global _sink
+    _sink = fn
+
+
 def _elevenlabs(text, mood):
     key = os.getenv("ELEVENLABS_API_KEY")
     if not key:
@@ -99,43 +113,73 @@ def _elevenlabs(text, mood):
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}?output_format=mp3_44100_128",
         headers={"xi-api-key": key, "Content-Type": "application/json"},
-        json={"text": text, "model_id": "eleven_flash_v2_5",
+        json={"text": text, "model_id": TTS_MODEL,
               "voice_settings": {"stability": stability, "similarity_boost": 0.75, "style": style,
                                  "use_speaker_boost": True}},
         timeout=20,
     )
     r.raise_for_status()
-    f = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    f.write(r.content)
-    f.close()
-    return f.name
+    return r.content
+
+
+def _say_wav(text, mood):
+    cmd = ["say", "-r", str(MOODS.get(mood, MOODS["warm"])[2]), "--data-format=LEI16@22050"]
+    if SAY_VOICE:
+        cmd += ["-v", SAY_VOICE]
+    with tempfile.NamedTemporaryFile(suffix=".wav") as f:
+        subprocess.run(cmd + ["-o", f.name, text], check=True)
+        return Path(f.name).read_bytes()
+
+
+def synthesize(text, mood="warm"):
+    """-> (audio_bytes, mime). ElevenLabs mp3, or a `say` wav if ElevenLabs is unavailable."""
+    try:
+        audio = _elevenlabs(text, mood)
+        if audio:
+            return audio, "audio/mpeg"
+    except Exception as e:
+        _log("ElevenLabs failed, using say:", e)
+    return _say_wav(text, mood), "audio/wav"
+
+
+def _duration(audio, mime):
+    if mime == "audio/wav":
+        return max(0.0, (len(audio) - 44) / (22050 * 2))
+    return len(audio) * 8 / 128000  # mp3 at 128 kbps
+
+
+def _play_local(audio, mime):
+    with tempfile.NamedTemporaryFile(suffix=".mp3" if mime == "audio/mpeg" else ".wav") as f:
+        f.write(audio)
+        f.flush()
+        subprocess.run(["afplay", f.name])
 
 
 def speak(text, mood="warm"):
-    """Say text out loud (blocks until done)."""
+    """Say text out loud and return the audio bytes. Blocks until it has finished playing
+    (on the page or the Mac), so Teddy never listens to himself."""
     text = (text or "").strip()
     if not text:
-        return
+        return b""
     if _mock["on"]:
         print(f"teddy ({mood})> {text}", flush=True)
-        return
+        return b""
+    audio, mime = synthesize(text, mood)
     speaking.set()
     try:
-        path = None
-        try:
-            path = _elevenlabs(text, mood)
-        except Exception as e:
-            _log("ElevenLabs failed, using say:", e)
-        if path:
-            subprocess.run(["afplay", path])
-            os.unlink(path)
+        sent = False
+        if _sink:
+            try:
+                sent = bool(_sink(audio, mime, text, mood))
+            except Exception as e:
+                _log("page sink failed, playing on Mac:", e)
+        if sent:
+            time.sleep(_duration(audio, mime) + 0.3)  # page is playing it; stay "speaking" meanwhile
         else:
-            cmd = ["say", "-r", str(MOODS.get(mood, MOODS["warm"])[2])]
-            if SAY_VOICE:
-                cmd += ["-v", SAY_VOICE]
-            subprocess.run(cmd + [text])
+            _play_local(audio, mime)
     finally:
         speaking.clear()
+    return audio
 
 
 if __name__ == "__main__":

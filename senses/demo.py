@@ -34,7 +34,7 @@ def test_detect():
     dets, s = timed(v.detect)
     check("detect remotes", any(d["label"] == "remote" for d in dets), dets, s)
     hit, s = timed(v.find, "the TV remote")
-    check("find('the TV remote')", hit and hit["label"] == "remote", hit, s)
+    check("find('the TV remote') + boxed image", hit and hit["label"] == "remote" and Path(hit["image"]).exists(), hit, s)
     hit, s = timed(v.find, "cat")  # open vocabulary
     check("find('cat') open-vocab", hit is not None, hit, s)
     hit, s = timed(v.find, "my keys")
@@ -91,9 +91,11 @@ def test_motion_gestures():
 
 def test_vlm():
     v = Vision(mock=True, source=A / "cats_remotes.jpg", log_sightings=False, background=False)
-    v._ask_vlm("Say ok.", 64, 2)  # load model into memory
+    v.warmup()
     r, s = timed(v.identify)
     check("identify", len(r) > 3, r, s)
+    (r, src), s = timed(v._ask_vlm, "What animals are in this picture? One short sentence.", 512, 40, 0.01)
+    check("gemini fallback when qwen is slow", src == "gemini" and r and "cat" in r.lower(), (r, src), s)
     v.close()
     v = Vision(mock=True, source=A / "medicine_label.jpg", log_sightings=False, background=False)
     r, s = timed(v.read_text)
@@ -114,8 +116,7 @@ def test_sightings():
 
 def test_vitals():
     v = Vision(mock=True, source=A / "zidane.jpg", log_sightings=False, background=False)
-    r = v.vitals()
-    check("vitals (mock fallback or Presage)", isinstance(r, dict), r)
+    check("vitals -> {} (Presage dropped)", v.vitals() == {}, v.vitals())
     v.close()
 
 
@@ -125,6 +126,11 @@ def test_voice():
     check("listen (hello.wav)", "keys" in r.lower(), r, s)
     voice.speak("I found your keys on the table!", mood="happy")
     voice.set_mock(False)
+    got = []
+    voice.set_sink(lambda audio, mime, text, mood: got.append((mime, len(audio))) or True)
+    audio, s = timed(voice.speak, "Hi! I'm Teddy.")
+    voice.set_sink(None)
+    check("speak -> bytes sent to page sink", len(audio) > 1000 and got, got, s)
 
 
 def live():

@@ -9,7 +9,6 @@ import base64
 import json
 import math
 import os
-import subprocess
 import sys
 import threading
 import time
@@ -34,6 +33,9 @@ except ImportError:
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 VLM = os.getenv("TEDDY_VLM", "qwen2.5vl:7b")
+GEMINI_MODEL = os.getenv("TEDDY_GEMINI", "gemini-flash-latest")
+VLM_DEADLINE = float(os.getenv("TEDDY_VLM_DEADLINE", 6))  # seconds before we give up on qwen
+SNAPSHOT = HERE / "snapshots" / "find.jpg"
 
 # canonical label -> YOLO-World prompt text
 TRACKED = {
@@ -164,6 +166,56 @@ def _sighting_logger():
         return _local_log_sighting
 
 
+UNSURE_WORDS = ("unsure", "not sure", "can't tell", "cannot tell", "hard to tell", "unclear", "can't see",
+                "cannot see", "too blurry", "can't read", "cannot read", "unable to", "not clear", "i don't know")
+
+
+def _unsure(ans):
+    a = ans.lower()
+    return len(a) < 3 or any(w in a for w in UNSURE_WORDS)
+
+
+def _gemini(prompt, jpg_b64):
+    key = os.getenv("GEMINI_API_KEY")
+    if not key:
+        _log("no GEMINI_API_KEY; can't fall back")
+        return None
+    try:
+        r = requests.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent",
+            headers={"x-goog-api-key": key}, timeout=15, json={
+                "contents": [{"parts": [{"inline_data": {"mime_type": "image/jpeg", "data": jpg_b64}},
+                                        {"text": prompt}]}],
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 300},
+            })
+        r.raise_for_status()
+        parts = r.json()["candidates"][0]["content"]["parts"]
+        return " ".join(p.get("text", "") for p in parts if not p.get("thought")).strip() or None
+    except Exception as e:
+        _log("gemini error:", e)
+        return None
+
+
+def _save_boxed(img, det, path=SNAPSHOT):
+    """Draw a big friendly box + label around det on a copy of img and save it as JPEG."""
+    img = img.copy()
+    h, w = img.shape[:2]
+    x1, y1 = int((det["x"] - det["w"] / 2) * w), int((det["y"] - det["h"] / 2) * h)
+    x2, y2 = int((det["x"] + det["w"] / 2) * w), int((det["y"] + det["h"] / 2) * h)
+    th = max(3, w // 160)
+    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 200, 255), th)
+    scale = max(0.8, w / 900)
+    (tw, tht), _ = cv2.getTextSize(det["label"], cv2.FONT_HERSHEY_SIMPLEX, scale, th)
+    ty = y1 - 10 if y1 - tht - 20 > 0 else y2 + tht + 10
+    cv2.rectangle(img, (x1, ty - tht - 10), (x1 + tw + 16, ty + 8), (0, 200, 255), -1)
+    cv2.putText(img, det["label"], (x1 + 8, ty), cv2.FONT_HERSHEY_SIMPLEX, scale, (40, 40, 40), th, cv2.LINE_AA)
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_suffix(".tmp.jpg")
+    cv2.imwrite(str(tmp), img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    os.replace(tmp, path)  # atomic, so the server never serves a half-written file
+    return path
+
+
 def normalize_query(query):
     q = query.lower().strip().rstrip("?.!")
     for prefix in ("my ", "the ", "a ", "an ", "your ", "our "):
@@ -206,11 +258,6 @@ class Vision:
         self._last_gesture = {}
         self._pose_ready = threading.Event()
 
-        # vitals
-        self._presage = None
-        self._vitals = {}
-        self._vitals_t = 0
-
         self._log_sighting = _sighting_logger() if log_sightings else None
         self._last_logged = {}
         if background:
@@ -242,7 +289,6 @@ class Vision:
             fails = 0
             with self._lock:
                 self._frame = f
-            self._feed_presage(f)
         cap.release()
 
     def _video_loop(self):
@@ -258,7 +304,6 @@ class Vision:
                 continue
             with self._lock:
                 self._frame = f
-            self._feed_presage(f)
             time.sleep(delay)
         cap.release()
 
@@ -276,12 +321,6 @@ class Vision:
 
     def close(self):
         self._running = False
-        if self._presage:
-            try:
-                self._presage.stdin.close()
-                self._presage.terminate()
-            except Exception:
-                pass
 
     # ---------- objects ----------
     def _run_world(self, img, classes=None):
@@ -317,8 +356,10 @@ class Vision:
             return []
         return self._to_dets(self._run_world(img), list(TRACKED.keys()))
 
-    def find(self, query):
-        """Best match for a spoken thing ("my keys", "red mug") or None."""
+    def find(self, query, save=True):
+        """Best match for a spoken thing ("my keys", "red mug") or None.
+        With save=True the dict also has "image": path to a JPEG of the frame with the object boxed
+        (always the same file, SNAPSHOT), for the iPad screen."""
         label = normalize_query(query)
         img = self.frame()
         if img is None:
@@ -327,7 +368,12 @@ class Vision:
             hits = [d for d in self._to_dets(self._run_world(img), list(TRACKED.keys())) if d["label"] == label]
         else:  # open vocabulary: ask YOLO-World for exactly this thing
             hits = self._to_dets(self._run_world(img, classes=[label]), [label])
-        return hits[0] if hits else None
+        if not hits:
+            return None
+        hit = hits[0]
+        if save:
+            hit["image"] = str(_save_boxed(img, hit))
+        return hit
 
     def _sighting_loop(self, every=2.0):
         while self._running:
@@ -346,50 +392,62 @@ class Vision:
                 _log("sighting loop error:", e)
             time.sleep(max(0.1, every - (time.time() - t0)))
 
-    # ---------- VLM (Ollama) ----------
-    def _ask_vlm(self, prompt, max_side=512, num_predict=60):
+    # ---------- VLM: local qwen2.5vl, Gemini if slow or unsure ----------
+    def _ask_vlm(self, prompt, max_side=512, num_predict=60, deadline=VLM_DEADLINE):
+        """Returns (answer, source). answer is None if both models failed or were unsure."""
         img = self.frame()
         if img is None:
-            return "I can't see anything right now."
+            return None, "none"
         s = max_side / max(img.shape[:2])
         if s < 1:
             img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-        ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        jpg = base64.b64encode(cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()).decode()
+        t = time.time()
         try:
-            r = requests.post(f"{OLLAMA_URL}/api/chat", timeout=60, json={
+            r = requests.post(f"{OLLAMA_URL}/api/chat", timeout=deadline, json={
                 "model": VLM, "stream": False, "keep_alive": "30m",
                 "options": {"temperature": 0.2, "num_predict": num_predict},
-                "messages": [{"role": "user", "content": prompt,
-                              "images": [base64.b64encode(jpg.tobytes()).decode()]}],
+                "messages": [{"role": "user", "content": prompt, "images": [jpg]}],
             })
             r.raise_for_status()
-            return r.json()["message"]["content"].strip()
+            ans = r.json()["message"]["content"].strip()
+            if not _unsure(ans):
+                return ans, "qwen"
+            _log(f"qwen unsure ({ans!r}); asking Gemini")
+        except requests.Timeout:
+            _log(f"qwen slower than {deadline}s; asking Gemini")
         except Exception as e:
             _log("ollama error:", e)
-            return "Hmm, my eyes are a little fuzzy right now. Can you try again?"
+        ans = _gemini(prompt, jpg)
+        _log(f"vlm answered in {time.time() - t:.1f}s via gemini")
+        return (None if ans is None or _unsure(ans) else ans), "gemini"
 
     def identify(self):
         """One short spoken sentence about what the person is showing the bear."""
-        return self._ask_vlm(
+        ans, _ = self._ask_vlm(
             "You are a gentle teddy bear talking to a child or an older adult. "
             "Look at what the person is holding up or showing you (or the main thing in view). "
             "Say what it is in ONE short, friendly sentence under 15 words. "
-            "Plain words only, no lists, no markdown.", num_predict=40)
+            "Plain words only, no lists, no markdown. "
+            "If you really can't tell what it is, reply only: UNSURE", num_predict=40)
+        return ans or "Hmm, I'm not sure what that is. Can you hold it a little closer?"
 
     def read_text(self):
         """Reads visible text aloud-friendly (labels, letters, medicine bottles)."""
-        return self._ask_vlm(
+        ans, _ = self._ask_vlm(
             "Read the text in this image for someone who cannot see it. "
             "If it is short, read it exactly. If it is long, say the most important parts "
             "(like a medicine name, dose, date, or who a letter is from) in under 40 words. "
             "Plain sentences for speaking aloud, no markdown. "
-            "If there is no readable text, say: I don't see any words.", max_side=896, num_predict=90)
+            "If there is no readable text, or it is too blurry to read, reply only: UNSURE",
+            max_side=896, num_predict=90)
+        return ans or "I can't make out any words. Can you hold it closer and keep it still?"
 
     def warmup(self):
         """Load all models so the first real call is fast."""
         _world(), _pose()
         self.detect()
-        self._ask_vlm("Say ok.", max_side=64, num_predict=2)
+        requests.post(f"{OLLAMA_URL}/api/generate", json={"model": VLM, "keep_alive": "30m"}, timeout=120)
 
     # ---------- pose: gestures + falls ----------
     def _pose_loop(self, hz=12):
@@ -475,67 +533,9 @@ class Vision:
         self._last_gesture[g["type"]] = now
         return g
 
-    # ---------- vitals (Presage SmartSpectra via Node bridge) ----------
-    def _start_presage(self):
-        bridge = HERE / "presage" / "bridge.mjs"
-        if not os.getenv("PRESAGE_API_KEY"):
-            return "no PRESAGE_API_KEY in .env"
-        if not (HERE / "presage" / "node_modules" / "@smartspectra").exists():
-            return "run: cd senses/presage && npm install"
-        try:
-            self._presage = subprocess.Popen(["node", str(bridge)], stdin=subprocess.PIPE,
-                                             stdout=subprocess.PIPE, cwd=str(HERE / "presage"),
-                                             env=os.environ.copy())
-        except Exception as e:
-            return f"node failed: {e}"
-        self._start(self._read_presage)
-        return None
-
-    def _read_presage(self):
-        for line in self._presage.stdout:
-            try:
-                msg = json.loads(line)
-            except Exception:
-                continue
-            if "heart_rate" in msg or "breathing_rate" in msg:
-                self._vitals = {k: round(v, 1) for k, v in msg.items() if v is not None}
-                self._vitals_t = time.time()
-            elif "error" in msg:
-                _log("presage:", msg["error"])
-
-    def _feed_presage(self, img):
-        p = self._presage
-        if p is None or p.poll() is not None:
-            return
-        try:
-            h, w = img.shape[:2]
-            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            hdr = np.array([w, h], "<u4").tobytes() + np.array([time.time() * 1e6], "<f8").tobytes()
-            p.stdin.write(hdr + rgb.tobytes())
-            p.stdin.flush()
-        except (BrokenPipeError, OSError):
-            self._presage = None
-
     def vitals(self):
-        """{"heart_rate", "breathing_rate"} from the webcam, or {} if not measured yet.
-        First call starts Presage; it needs ~15-30s of a still, well-lit face to lock on."""
-        if self._presage is None and not getattr(self, "_presage_err", None):
-            self._presage_err = self._start_presage()
-            if self._presage_err:
-                _log("vitals unavailable:", self._presage_err)
-            elif self._static:
-                # feed the still image repeatedly so the SDK has a stream
-                self._start(self._static_feed)
-        if self._vitals and time.time() - self._vitals_t < 15:
-            return dict(self._vitals)
-        if self.mock and self._presage_err:
-            return {"heart_rate": 72, "breathing_rate": 14, "mock": True}
+        """Presage was dropped (no Python SDK), so there are no webcam vitals: always {}."""
         return {}
-
-    def _static_feed(self):
-        while self._running and self._presage:
-            self._feed_presage(self.frame())
-            time.sleep(1 / 30)
 
 
 # ---------- pose geometry ----------
