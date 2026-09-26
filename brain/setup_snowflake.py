@@ -1,4 +1,4 @@
-"""One-shot Snowflake setup: tables, stages, PDFs -> Cortex PARSE_DOCUMENT -> chunks -> Cortex Search,
+"""One-shot Snowflake setup: tables, stages, PDFs -> AI_PARSE_DOCUMENT -> chunks -> Cortex Search (DOC_SEARCH),
 semantic model for Cortex Analyst, and a check of which Cortex models this account can use.
 
     python -m brain.setup_snowflake            # everything
@@ -15,13 +15,14 @@ DOCS = sf.ROOT / "data" / "docs"
 
 
 def run_file(b, path):
-    for stmt in [s.strip() for s in path.read_text().split(";")]:
-        body = "\n".join(l for l in stmt.splitlines() if not l.strip().startswith("--")).strip()
+    text = "\n".join(l for l in path.read_text().splitlines() if not l.strip().startswith("--"))
+    for stmt in text.replace("{WH}", sf.WAREHOUSE).split(";"):
+        body = stmt.strip()
         if not body:
             continue
         print(f"  > {body.splitlines()[0][:90]}")
         try:
-            b.query(body)
+            b.query(body, timeout=900)
         except Exception as e:
             if "CORTEX_ENABLED_CROSS_REGION" in body:
                 print(f"    (skipped, needs ACCOUNTADMIN: {e})")
@@ -45,19 +46,22 @@ def docs(b):
     for p in pdfs:
         print(f"   PUT {p.name}")
         b.query(f"PUT 'file://{p}' @TEDDY.CORE.DOCS AUTO_COMPRESS=FALSE OVERWRITE=TRUE")
-    print("4) PARSE_DOCUMENT -> chunks -> Cortex Search service (can take a minute)")
+    print("4) AI_PARSE_DOCUMENT (LAYOUT) -> 1500/200 chunks -> DOC_SEARCH service (a minute or two)")
     run_file(b, SQL / "ingest_docs.sql")
     for r in b.query("SELECT DOMAIN, COUNT(*) AS N FROM DOC_CHUNKS GROUP BY 1 ORDER BY 1"):
         print(f"   {r['domain']}: {r['n']} chunks")
 
 
 def models(b):
-    print("5) Which open Cortex models work here (and how fast)?")
+    print("5) SHOW CORTEX BASE MODELS, then test the ones Teddy uses")
+    names = {r["name"].lower() for r in b.query("SHOW CORTEX BASE MODELS IN ACCOUNT")}
+    for m in ["llama3.3-70b", "mistral-large3", "mistral-large2", "llama3.1-8b"]:
+        print(f"   {'listed' if m in names else 'MISSING'}  {m}")
     ok = []
-    for m in ["llama3.3-70b", "llama3.1-70b", "mistral-large2", "llama3.1-8b", "mistral-7b", "llama4-maverick"]:
+    for m in ["llama3.3-70b", "mistral-large3", "mistral-large2", "llama3.1-8b"]:
         t = time.time()
         try:
-            b.query("SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, 'Say hi in 3 words.') AS R", (m,))
+            b.query("SELECT AI_COMPLETE(%s, 'Say hi in 3 words.') AS R", (m,), timeout=25)
             ok.append(m)
             print(f"   OK   {m:18s} {time.time() - t:.1f}s")
         except Exception as e:
@@ -70,7 +74,7 @@ def smoke(b):
     print("6) Smoke test ask()")
     for q, d in [("How fast do I push during CPR?", "cpr"), ("What do I do for a burn?", "first_aid")]:
         r = sf.ask_detailed(q, d)
-        print(f"   Q: {q}\n   A: {r['answer']}  [{r['model']}, {r['ms']}ms, {r['sources']}]")
+        print(f"   Q: {q}\n   A: {r['answer']}  [{r['model']}, {r['ms']}ms]")
 
 
 if __name__ == "__main__":

@@ -30,11 +30,13 @@ TZ = os.getenv("TEDDY_TZ", "America/New_York")
 OWNER = os.getenv("TEDDY_OWNER", "Grandma Rose")
 OLLAMA_MODEL = os.getenv("TEDDY_OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-# Open models only, best first. Override with TEDDY_CORTEX_MODEL.
-CORTEX_MODELS = [m for m in [os.getenv("TEDDY_CORTEX_MODEL"),
-                             "llama3.3-70b", "llama3.1-70b", "mistral-large2",
-                             "llama3.1-8b", "mistral-7b"] if m]
-SEARCH_SERVICE = "TEDDY.CORE.DOCS_SEARCH"
+# Open models, best first (confirmed with SHOW CORTEX BASE MODELS). Override with TEDDY_CORTEX_MODEL.
+# mistral-large2 is legacy on our account ("please use other models"), so mistral-large3 is the Mistral fallback.
+CORTEX_MODELS = [m for m in [os.getenv("TEDDY_CORTEX_MODEL"), "llama3.3-70b", "mistral-large3", "mistral-large2",
+                             "llama3.1-8b"] if m]
+WAREHOUSE = os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH")
+SEARCH_SERVICE = "TEDDY.CORE.DOC_SEARCH"
+FRAMES_DIR = ROOT / "data" / "frames"
 SEMANTIC_MODEL = "@TEDDY.CORE.MODELS/teddy_semantic.yaml"
 
 NOT_SURE = "Hmm, I'm not sure about that one. Let's ask a grown-up."
@@ -86,27 +88,29 @@ class SnowflakeBackend:
                     user=os.environ["SNOWFLAKE_USER"],
                     password=os.environ["SNOWFLAKE_PASSWORD"],
                     role=os.getenv("SNOWFLAKE_ROLE") or None,
-                    warehouse=os.getenv("SNOWFLAKE_WAREHOUSE", "TEDDY_WH"),
+                    warehouse=WAREHOUSE,
                     database="TEDDY", schema="CORE",
                     session_parameters={"TIMEZONE": TZ, "QUERY_TAG": "teddy"},
                     client_session_keep_alive=True, login_timeout=20)
             return self._conn
 
-    def query(self, sql, params=None):
-        with self._lock:
-            try:
-                cur = self.conn().cursor()
-                cur.execute(sql, params)
-            except Exception as e:  # dropped session -> reconnect once
-                if "session" not in str(e).lower() and "connection" not in str(e).lower():
-                    raise
+    def query(self, sql, params=None, timeout=60):
+        # One shared connection; separate cursors run concurrently (a slow caregiver
+        # question never blocks Teddy's answers or the event writer).
+        try:
+            cur = self.conn().cursor()
+            cur.execute(sql, params, timeout=timeout)
+        except Exception as e:  # dropped session -> reconnect once
+            if "session" not in str(e).lower() and "connection" not in str(e).lower():
+                raise
+            with self._lock:
                 self._conn = None
-                cur = self.conn().cursor()
-                cur.execute(sql, params)
-            if cur.description is None:
-                return []
-            cols = [c[0].lower() for c in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+            cur = self.conn().cursor()
+            cur.execute(sql, params, timeout=timeout)
+        if cur.description is None:
+            return []
+        cols = [c[0].lower() for c in cur.description]
+        return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def insert_events(self, rows):  # rows: [(ts, kind, json_str)]
         for i in range(0, len(rows), 300):
@@ -115,31 +119,43 @@ class SnowflakeBackend:
             self.query("INSERT INTO EVENTS (TS, KIND, DATA) SELECT column1::TIMESTAMP_NTZ, column2, "
                        f"PARSE_JSON(column3) FROM VALUES {vals}", [v for r in part for v in r])
 
-    def insert_sightings(self, rows):  # rows: [(ts, label, x, y)]
+    def insert_sightings(self, rows):  # rows: [(ts, label, x, y, w, h, frame_path)]
         for i in range(0, len(rows), 500):
             part = rows[i:i + 500]
-            vals = ",".join(["(%s,%s,%s,%s)"] * len(part))
-            self.query(f"INSERT INTO SIGHTINGS (TS, LABEL, X, Y) VALUES {vals}", [v for r in part for v in r])
+            vals = ",".join(["(%s,%s,%s,%s,%s,%s,%s)"] * len(part))
+            self.query(f"INSERT INTO SIGHTINGS (TS, LABEL, X, Y, W, H, FRAME_PATH) VALUES {vals}",
+                       [v for r in part for v in r])
+
+    def upload_frame(self, path):
+        self.query(f"PUT 'file://{path}' @TEDDY.CORE.FRAMES AUTO_COMPRESS=FALSE OVERWRITE=TRUE")
 
     def complete(self, prompt):
-        """Cortex COMPLETE with the first open model this account can use."""
-        models = [self.model] if self.model else CORTEX_MODELS
+        """AI_COMPLETE with llama3.3-70b, falling back to mistral-large2."""
+        models = [self.model] + [m for m in CORTEX_MODELS if m != self.model] if self.model else CORTEX_MODELS
         last = None
         for m in models:
             try:
-                out = self.query("SELECT SNOWFLAKE.CORTEX.COMPLETE(%s, %s) AS R", (m, prompt))[0]["r"]
+                out = self.query("SELECT AI_COMPLETE(%s, %s) AS R", (m, prompt), timeout=25)[0]["r"]
                 self.model = m
+                out = out.strip()
+                if out.startswith('"'):  # AI_COMPLETE hands back a JSON-encoded string
+                    try:
+                        out = json.loads(out)
+                    except ValueError:
+                        pass
                 return out.strip()
             except Exception as e:
+                print(f"[brain] AI_COMPLETE {m} failed: {str(e).splitlines()[0][:120]}")
                 last = e
         raise RuntimeError(f"No Cortex model available: {last}")
 
     def search(self, question, domain=None, k=4):
-        """Cortex Search retrieval -> [{"chunk","title","domain"}]."""
+        """Cortex Search retrieval -> [{"chunk","title","domain"}] (SEARCH_PREVIEW over DOC_SEARCH)."""
         req = {"query": question, "columns": ["CHUNK", "TITLE", "DOMAIN"], "limit": k}
         if domain:
             req["filter"] = {"@eq": {"DOMAIN": domain}}
-        r = self.query("SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(%s, %s) AS R", (SEARCH_SERVICE, json.dumps(req)))
+        r = self.query("SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(%s, %s) AS R", (SEARCH_SERVICE, json.dumps(req)),
+                       timeout=15)
         hits = json.loads(r[0]["r"]).get("results", [])
         return [{k.lower(): v for k, v in h.items()} for h in hits]
 
@@ -197,9 +213,12 @@ class LocalBackend:
         self._lock = threading.RLock()
         self._db = sqlite3.connect(self.path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        cols = [r[1] for r in self._db.execute("PRAGMA table_info(SIGHTINGS)")]
+        if cols and "FRAME_PATH" not in cols:  # old mock schema -> start fresh
+            self._db.executescript("DROP TABLE SIGHTINGS; DROP TABLE IF EXISTS EVENTS; DROP VIEW IF EXISTS EVENTS_FLAT;")
         self._db.executescript("""
-            CREATE TABLE IF NOT EXISTS SIGHTINGS (TS TEXT, LABEL TEXT, X REAL, Y REAL);
-            CREATE TABLE IF NOT EXISTS EVENTS (TS TEXT, KIND TEXT, DATA TEXT);
+            CREATE TABLE IF NOT EXISTS SIGHTINGS (LABEL TEXT, X REAL, Y REAL, W REAL, H REAL, FRAME_PATH TEXT, TS TEXT);
+            CREATE TABLE IF NOT EXISTS EVENTS (KIND TEXT, DATA TEXT, TS TEXT);
             CREATE VIEW IF NOT EXISTS EVENTS_FLAT AS SELECT TS, date(TS) AS DAY, KIND,
               json_extract(DATA,'$.source') AS SOURCE, json_extract(DATA,'$.intent') AS INTENT,
               json_extract(DATA,'$.object') AS OBJECT, json_extract(DATA,'$.score') AS MOOD_SCORE,
@@ -217,12 +236,13 @@ class LocalBackend:
 
     def insert_events(self, rows):
         with self._lock:
-            self._db.executemany("INSERT INTO EVENTS VALUES (?,?,?)", rows)
+            self._db.executemany("INSERT INTO EVENTS (TS, KIND, DATA) VALUES (?,?,?)", rows)
             self._db.commit()
 
     def insert_sightings(self, rows):
         with self._lock:
-            self._db.executemany("INSERT INTO SIGHTINGS VALUES (?,?,?,?)", rows)
+            self._db.executemany("INSERT INTO SIGHTINGS (TS, LABEL, X, Y, W, H, FRAME_PATH) "
+                                 "VALUES (?,?,?,?,?,?,?)", rows)
             self._db.commit()
 
     def complete(self, prompt):
@@ -242,6 +262,9 @@ class LocalBackend:
             if s:
                 scored.append((s, {"chunk": chunk, "title": title, "domain": d}))
         return [h for _, h in sorted(scored, key=lambda t: -t[0])[:k]]
+
+    def upload_frame(self, path):
+        pass
 
     def run_readonly(self, sql):
         ro = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
@@ -263,7 +286,10 @@ _feed = deque(maxlen=300)
 _feed_id = 0
 _feed_lock = threading.Lock()
 _listeners = []
-_seen = {}  # label -> (ts, x, y), instant memory for last_seen
+_seen = {}  # label -> dict(ts, x, y, w, h, frame_path, t), instant memory for last_seen
+_frame_source = None  # callable -> BGR numpy frame (set by the agent from vision.frame)
+_last_frame = {"t": 0, "path": None}
+_last_upload = [0.0]
 
 
 def configure(mock=None):
@@ -327,36 +353,93 @@ def log_event(kind, data=None):
     _q.put((backend().insert_events, [(ts, kind, json.dumps(data, default=str))]))
 
 
-def log_sighting(label, x, y):
-    """Called by the vision loop constantly; only stores when something is new or moved."""
+def set_frame_source(fn):
+    """Give the brain the camera (vision.frame) so sightings carry a photo."""
+    global _frame_source
+    _frame_source = fn
+
+
+def save_frame(img=None, tag="frame", upload=False):
+    """Save a BGR frame to data/frames and (async) to the @FRAMES stage. -> file name or None."""
+    if img is None and _frame_source:
+        try:
+            img = _frame_source()
+        except Exception:
+            img = None
+    if img is None:
+        return None
+    try:
+        import cv2
+        FRAMES_DIR.mkdir(parents=True, exist_ok=True)
+        name = f"{dt.datetime.now():%Y%m%d_%H%M%S}_{re.sub(r'[^a-z0-9]+', '-', tag.lower())[:24]}.jpg"
+        cv2.imwrite(str(FRAMES_DIR / name), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    except Exception as e:
+        print(f"[brain] save_frame failed: {e}")
+        return None
+    if upload or time.time() - _last_upload[0] > 30:  # keep stage uploads light
+        _last_upload[0] = time.time()
+        _q.put((backend().upload_frame, FRAMES_DIR / name))
+    return name
+
+
+def log_sighting(label, x, y, frame_path=None, w=None, h=None):
+    """Called by the vision loop constantly; only stores when something is new or moved.
+    Grabs one camera frame per ~10 s (shared by every label seen in it) for the photo memory."""
     label = (label or "").lower().strip()
     if not label:
         return
     now = time.time()
     prev = _seen.get(label)
-    if prev and now - prev[3] < 5 and abs(prev[1] - x) < 0.05 and abs(prev[2] - y) < 0.05:
+    if prev and not frame_path and now - prev["t"] < 5 and abs(prev["x"] - x) < 0.05 and abs(prev["y"] - y) < 0.05:
         return
-    _seen[label] = (_ts(), float(x), float(y), now)
-    _q.put((backend().insert_sightings, [(_ts(), label, float(x), float(y))]))
+    if not frame_path:
+        if now - _last_frame["t"] > 10:
+            _last_frame.update(t=now, path=save_frame(tag="seen"))
+        frame_path = _last_frame["path"]
+    ts = _ts()
+    _seen[label] = {"ts": ts, "x": float(x), "y": float(y), "w": w, "h": h, "frame_path": frame_path, "t": now}
+    _q.put((backend().insert_sightings, [(ts, label, float(x), float(y), w, h, frame_path)]))
+
+
+def nearby(label, ts, x, y, window_s=15):
+    """Closest other object seen around the same moment -> label or None ("by the laptop")."""
+    t = dt.datetime.fromisoformat(str(ts)[:19])
+    lo, hi = _ts(t - dt.timedelta(seconds=window_s)), _ts(t + dt.timedelta(seconds=window_s))
+    try:
+        rows = backend().query(
+            "SELECT LABEL, AVG(X) AS X, AVG(Y) AS Y FROM SIGHTINGS WHERE TS BETWEEN %s AND %s "
+            "AND LOWER(LABEL) <> %s AND LABEL <> 'person' GROUP BY LABEL", (lo, hi, label))
+    except Exception as e:
+        print(f"[brain] nearby failed: {e}")
+        return None
+    rows = [r for r in rows if r["x"] is not None]
+    if not rows:
+        return None
+    best = min(rows, key=lambda r: (float(r["x"]) - x) ** 2 + (float(r["y"]) - y) ** 2)
+    return best["label"] if ((float(best["x"]) - x) ** 2 + (float(best["y"]) - y) ** 2) ** .5 < 0.35 else None
 
 
 def last_seen(label):
-    """-> {"label","ts","x","y","where"} or None."""
+    """-> {"label","ts","x","y","w","h","frame_path","where","when","near"} or None."""
     label = (label or "").lower().strip()
     hit = _seen.get(label)
     if hit:
-        ts, x, y = hit[0], hit[1], hit[2]
+        row = dict(hit)
     else:
         try:
-            rows = backend().query("SELECT TS, LABEL, X, Y FROM SIGHTINGS WHERE LOWER(LABEL) LIKE %s "
-                                   "ORDER BY TS DESC LIMIT 1", (f"%{label}%",))
+            rows = backend().query("SELECT TS, LABEL, X, Y, W, H, FRAME_PATH FROM SIGHTINGS "
+                                   "WHERE LOWER(LABEL) LIKE %s ORDER BY TS DESC LIMIT 1", (f"%{label}%",))
         except Exception as e:
             print(f"[brain] last_seen failed: {e}")
             rows = []
         if not rows:
             return None
-        ts, x, y = str(rows[0]["ts"])[:19], rows[0]["x"], rows[0]["y"]
-    return {"label": label, "ts": ts, "x": x, "y": y, "where": describe_spot(x, y), "when": describe_time(ts)}
+        row = rows[0]
+        row["ts"] = str(row["ts"])[:19]
+    x, y = float(row["x"]), float(row["y"])
+    return {"label": label, "ts": row["ts"], "x": x, "y": y, "w": row.get("w"), "h": row.get("h"),
+            "frame_path": row.get("frame_path"), "where": describe_spot(x, y), "when": describe_time(row["ts"]),
+            "near": nearby(label, row["ts"], x, y)}
 
 
 def describe_spot(x, y):
@@ -382,7 +465,7 @@ def complete(prompt):
 
 
 def ask_detailed(question, domain=None):
-    """RAG: Cortex Search retrieval + Cortex COMPLETE, answer only from sources."""
+    """RAG: Cortex Search retrieval + AI_COMPLETE. Answers only from sources and names the source."""
     t0 = time.time()
     b = backend()
     try:
@@ -390,26 +473,36 @@ def ask_detailed(question, domain=None):
     except Exception as e:
         print(f"[brain] search failed: {e}")
         hits = []
+    source = None
     if not hits:
         ans = NOT_SURE
     else:
-        sources = "\n\n".join(f"[{h.get('title', '')}] {h['chunk']}" for h in hits)
+        sources = "\n\n".join(f"SOURCE {i + 1} ({h.get('title', '')}):\n{h['chunk']}" for i, h in enumerate(hits))
         prompt = (
             "You are Teddy, a gentle teddy bear speaking out loud to a child or an older adult.\n"
-            "Answer the question using ONLY the sources below. If the sources do not answer it, reply exactly: "
-            f"\"{NOT_SURE}\"\n"
-            "Rules: at most 3 short sentences, simple words, no lists, no markdown, no citations. "
-            "For anything medical or dangerous, start with 'Call 911' when it could be an emergency.\n\n"
-            f"SOURCES:\n{sources}\n\nQUESTION: {question}\nTEDDY SAYS:")
+            "Answer the question using ONLY the sources below. If they do not answer it, reply exactly: "
+            f"\"{NOT_SURE}\" and then on a new line: SOURCE: 0\n"
+            "Rules: at most 3 short sentences, simple words, no lists, no markdown. "
+            "For anything medical or dangerous, start with 'Call 911' when it could be an emergency.\n"
+            "After the answer, on its own line, write SOURCE: and the number of the source you used most.\n\n"
+            f"{sources}\n\nQUESTION: {question}\nTEDDY SAYS:")
         try:
-            ans = _spoken(b.complete(prompt)) or NOT_SURE
+            raw = b.complete(prompt)
+            m = re.search(r"SOURCE:?\s*(\d+)", raw, re.I)
+            n = int(m.group(1)) if m else 1
+            ans = _spoken(re.sub(r"\n?\s*SOURCE:?.*$", "", raw, flags=re.I | re.S)) or NOT_SURE
+            if NOT_SURE.split(".")[0].lower() in ans.lower() or n == 0:
+                ans = NOT_SURE
+            else:
+                source = hits[min(max(n, 1), len(hits)) - 1].get("title")
         except Exception as e:
             print(f"[brain] complete failed: {e}")
             ans = NOT_SURE
-    out = {"answer": ans, "sources": [h.get("title") for h in hits], "domain": domain,
-           "engine": b.name, "model": getattr(b, "model", None) or OLLAMA_MODEL,
+    spoken = f"{ans} That's from the {source}." if source else ans
+    out = {"answer": spoken, "text": ans, "source": source, "sources": [h.get("title") for h in hits],
+           "domain": domain, "engine": b.name, "model": getattr(b, "model", None) or OLLAMA_MODEL,
            "ms": int((time.time() - t0) * 1000)}
-    log_event("ask", {"text": question, "domain": domain, "reply": ans, "sources": out["sources"]})
+    log_event("ask", {"text": question, "domain": domain, "reply": spoken, "source": source})
     return out
 
 
@@ -487,7 +580,8 @@ def caregiver_ask(question):
             r["spot"] = describe_spot(float(r["x"]), float(r["y"]))
     try:
         st = stats()
-        digest = {"mood_by_day": dict(zip(st["days"], st["mood"])), "alerts": st["alerts"][:5],
+        digest = {"mood_by_day": dict(zip(st["days"], st["mood"])),
+                  "alerts": [{**a, "when": describe_time(a["ts"])} for a in st["alerts"][:5]],
                   "objects_last_seen": st["last_seen"], "top_requests": st["intents"]}
     except Exception:
         digest = {}

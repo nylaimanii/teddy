@@ -62,9 +62,9 @@ tables:
         data_type: NUMBER
         default_aggregation: avg
       - name: event_count
-        expr: 1
+        expr: TS
         data_type: NUMBER
-        default_aggregation: sum
+        default_aggregation: count
   - name: sightings
     description: Objects the bear's camera saw and where in the room (x,y from 0 to 1).
     base_table:

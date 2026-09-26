@@ -31,6 +31,9 @@ SAYINGS = [
 ]
 OBJECTS = {"keys": (0.78, 0.62), "glasses": (0.22, 0.40), "phone": (0.55, 0.70), "remote": (0.40, 0.75),
            "pill bottle": (0.85, 0.35), "wallet": (0.70, 0.60), "cup": (0.30, 0.66)}
+# Furniture the camera always sees; gives "by the laptop" context to last_seen.
+LANDMARKS = {"laptop": (0.74, 0.55), "couch": (0.20, 0.55), "tv": (0.47, 0.28), "kitchen table": (0.38, 0.80),
+             "shelf": (0.86, 0.30)}
 
 
 def at(days_ago, hour, minute=0):
@@ -40,6 +43,11 @@ def at(days_ago, hour, minute=0):
 
 def build():
     ev, sg = [], []
+
+    def sight(t, obj, x, y):
+        sg.append((sf._ts(t), obj, round(x, 3), round(y, 3), 0.08, 0.08, None))
+        for lm, (lx, ly) in LANDMARKS.items():
+            sg.append((sf._ts(t), lm, lx, ly, 0.2, 0.2, None))
 
     def e(t, kind, **data):
         if t <= dt.datetime.now():
@@ -82,8 +90,7 @@ def build():
             for _ in range(random.randint(1, 3)):
                 t = at(d, random.randint(8, 21), random.randint(0, 59))
                 if t <= dt.datetime.now():
-                    sg.append((sf._ts(t), obj, round(x + random.uniform(-.06, .06), 3),
-                               round(y + random.uniform(-.06, .06), 3)))
+                    sight(t, obj, x + random.uniform(-.05, .05), y + random.uniform(-.05, .05))
 
     # the scary-but-OK moment on Wednesday night
     t = at(3, 22, 41)
@@ -97,7 +104,7 @@ def build():
     e(at(2, 15, 5), "alert", status="no_response", text="Rose didn't answer the afternoon check-in")
     e(at(2, 15, 25), "mood", score=2, mood="in pain", text="Sorry Teddy, I was lying down. Knee's sore.")
     # keys: last seen by the front door this morning
-    sg.append((sf._ts(at(0, 8, 12) if at(0, 8, 12) <= dt.datetime.now() else at(1, 20, 5)), "keys", 0.81, 0.58))
+    sight(at(0, 8, 12) if at(0, 8, 12) <= dt.datetime.now() else at(1, 20, 5), "keys", 0.79, 0.58)
     return ev, sg
 
 
