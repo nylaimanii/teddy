@@ -1,6 +1,6 @@
-"""Public URL for the phone page via a free Cloudflare quick tunnel, plus a QR code PNG.
+"""Public URL for Teddy's screen (iPad) via a free Cloudflare quick tunnel, plus a QR code PNG.
 
-    python -m web.server --mock      # in one terminal
+    python -m web.server             # in one terminal
     python -m web.tunnel             # in another -> prints URL, writes web/qr.png, opens it
 """
 import os
@@ -31,7 +31,7 @@ def main():
             qr = qrcode.QRCode(border=2, box_size=14, error_correction=qrcode.constants.ERROR_CORRECT_M)
             qr.add_data(url)
             qr.make_image(fill_color="black", back_color="white").save(OUT)
-            print(f"\n  Phone remote:  {url}\n  Caregiver:     {url}/caregiver\n  QR code:       {OUT}\n", flush=True)
+            print(f"\n  Teddy's screen: {url}\n  Caregiver:      {url}/caregiver\n  QR code:        {OUT}\n", flush=True)
             if sys.platform == "darwin" and "--no-open" not in sys.argv:
                 subprocess.run(["open", str(OUT)])
             print("  (tunnel running, Ctrl+C to stop; takes ~10s before the URL answers)")

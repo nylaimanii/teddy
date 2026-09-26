@@ -263,20 +263,35 @@ function fallbackVoice(m, done) {
   } catch { setTimeout(done, m.text.length * 60); }
 }
 
-/* ---------------- live stream ---------------- */
+/* ---------------- live stream (SSE, or long-polling when a proxy buffers SSE) ---------------- */
+function handle(m) {
+  if (m.type === 'say') onSay(m);
+  else if (m.type === 'hush') hush();
+  else if (m.type === 'screen') render(m);
+  else if (m.type === 'listening') { listening = m.on; setPill(); }
+  else if (m.type === 'event') addEvent(m);
+}
+const online = on => { $('#pill').classList.toggle('off', !on); if (on) setPill(); else $('#pillText').textContent = 'Reconnecting…'; };
 function connect() {
   es?.close();
+  let got = false;
   es = new EventSource('/api/stream' + (speaker ? '?speaker=1' : ''));
-  es.onopen = () => { $('#pill').classList.remove('off'); setPill(); };
-  es.onerror = () => { $('#pill').classList.add('off'); $('#pillText').textContent = 'Reconnecting…'; };
-  es.onmessage = e => {
-    const m = JSON.parse(e.data);
-    if (m.type === 'say') onSay(m);
-    else if (m.type === 'hush') hush();
-    else if (m.type === 'screen') render(m);
-    else if (m.type === 'listening') { listening = m.on; setPill(); }
-    else if (m.type === 'event') addEvent(m);
-  };
+  es.onopen = () => online(true);
+  es.onerror = () => online(false);
+  es.onmessage = e => { got = true; handle(JSON.parse(e.data)); };
+  // Cloudflare quick tunnels hold event-streams back; if nothing arrives quickly, poll instead.
+  setTimeout(() => { if (!got) { es.close(); es = null; pollLoop(); } }, 4000);
+}
+const CID = Math.random().toString(36).slice(2);
+async function pollLoop() {
+  let after = -1;
+  for (;;) {
+    try {
+      const r = await fetch(`/api/poll?after=${after}&speaker=${speaker ? 1 : 0}&cid=${CID}`, { cache: 'no-store' });
+      const j = await r.json(); online(true);
+      after = j.seq; j.msgs.forEach(handle);
+    } catch { online(false); await new Promise(r => setTimeout(r, 2000)); }
+  }
 }
 let listening = false;
 function setPill() {

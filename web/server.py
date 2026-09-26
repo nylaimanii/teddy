@@ -12,11 +12,15 @@ All of Teddy's speech plays on the screen: ElevenLabs audio is streamed through 
 the page falls back to the browser's own speech if that fails. No screen open -> the Mac speaks.
 """
 import asyncio
+import itertools
 import json
 import os
 import re
 import sys
+import threading
+import time
 import uuid
+from collections import deque
 from pathlib import Path
 
 import requests
@@ -43,19 +47,28 @@ teddy: Teddy = None
 _clients = {}  # client id -> (asyncio.Queue, is_speaker)
 _loop = None
 _audio = {}  # id -> (bytes, mime) handed over by senses.voice's sink
+# Long-poll fallback: Cloudflare quick tunnels buffer event-streams, so the page polls /api/poll instead.
+_log = deque(maxlen=400)  # (seq, json)
+_seq = itertools.count(1)
+_log_lock = threading.Lock()
+_pollers = {}  # client id -> (last poll time, is_speaker)
 
 
 def _broadcast(msg):
-    """Thread-safe: push a message to every open screen."""
+    """Thread-safe: push a message to every open screen (SSE queues + the long-poll log)."""
+    data = json.dumps(msg, default=str)
+    with _log_lock:
+        _log.append((next(_seq), data))
     if _loop is None:
         return
-    data = json.dumps(msg, default=str)
     for q, _ in list(_clients.values()):
         _loop.call_soon_threadsafe(q.put_nowait, data)
 
 
 def _speakers():
-    return sum(1 for _, spk in _clients.values() if spk)
+    now = time.time()
+    return sum(1 for _, spk in _clients.values() if spk) + \
+        sum(1 for t, spk in list(_pollers.values()) if spk and now - t < 30)
 
 
 def _voice_sink(audio, mime, text, mood):
@@ -130,6 +143,31 @@ async def stream(request: Request, speaker: int = 0):
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/poll")
+async def poll(after: int = -1, speaker: int = 0, cid: str = ""):
+    """Long-poll: waits up to 20 s for messages newer than `after`. after=-1 -> current screen + recent feed."""
+    if cid:
+        _pollers[cid] = (time.time(), bool(speaker))
+    if after < 0:
+        with _log_lock:
+            last = _log[-1][0] if _log else 0
+        msgs = [json.dumps(screen.state())] + [json.dumps({"type": "event", **ev}, default=str)
+                                               for ev in sf.recent_events()[-15:]]
+        return {"seq": last, "msgs": [json.loads(m) for m in msgs]}
+    end = time.time() + 20
+    while time.time() < end:
+        with _log_lock:
+            new = [(n, d) for n, d in _log if n > after]
+        if new:
+            if cid:
+                _pollers[cid] = (time.time(), bool(speaker))
+            return {"seq": new[-1][0], "msgs": [json.loads(d) for _, d in new]}
+        await asyncio.sleep(0.1)
+    if cid:
+        _pollers[cid] = (time.time(), bool(speaker))
+    return {"seq": after, "msgs": []}
 
 
 @app.get("/api/tts/{sid}")
