@@ -62,10 +62,17 @@
   .alert .when { color: var(--text-secondary); font-size: 13px; }
   #live li { font-size: 14px; }
   table.sr-table { position: absolute; left: -9999px; }
+  nav.tabs { display: inline-flex; gap: 6px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin-bottom: 14px; }
+  nav.tabs a { color: var(--text-primary); padding: 8px 16px; border-radius: 999px; text-decoration: none; font-weight: 600; }
+  nav.tabs a[aria-current="page"] { background: var(--series-1); color: #fff; }
 </style>
 </head>
 <body>
 <div class="wrap">
+  <nav class="tabs" aria-label="Pages">
+    <a href="/"><span aria-hidden="true">🧸</span> Teddy</a>
+    <a href="/caregiver" aria-current="page"><span aria-hidden="true">📊</span> Caregiver</a>
+  </nav>
   <header>
     <h1><span aria-hidden="true">🧸</span> <span id="owner">Teddy</span>'s week <small>Caregiver dashboard</small></h1>
     <span class="badge" id="engine">Brain: <b>…</b></span>
@@ -81,6 +88,7 @@
       </form>
       <div class="chips" role="group" aria-label="Example questions">
         <button class="chip" type="button">Where did I leave my keys?</button>
+        <button class="chip" type="button">How was today?</button>
         <button class="chip" type="button">How was grandma this week?</button>
         <button class="chip" type="button">Did she fall or need help?</button>
         <button class="chip" type="button">What has she been asking Teddy for?</button>

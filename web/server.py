@@ -1,39 +1,173 @@
-"""Phone remote + caregiver dashboard. Runs the bear in-process.
+"""Teddy's screen (iPad) + caregiver dashboard. Runs the bear in-process.
 
-    python -m web.server            # real hardware where available
-    python -m web.server --mock     # no hardware, local memory
-    then: python -m web.tunnel      # public URL + QR code for phones
+    python -m web.server            # real hardware where available, Snowflake if .env has creds
+    python -m web.server --mock     # no hardware (brain still uses Snowflake)
+    python -m web.server --mock --offline   # no hardware, no internet: SQLite + Ollama brain
+    python -m web.tunnel            # public URL + QR code for the iPad
 
-Phone page:      http://localhost:8000/
-Caregiver page:  http://localhost:8000/caregiver
+Teddy's screen:  http://localhost:8000/            (tap "Wake Teddy" once so the iPad can play audio)
+Caregiver:       http://localhost:8000/caregiver
+
+All of Teddy's speech plays on the screen: ElevenLabs audio is streamed through /api/tts/<id>;
+the page falls back to the browser's own speech if that fails. No screen open -> the Mac speaks.
 """
+import asyncio
+import json
 import os
+import re
 import sys
+import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+import requests
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from brain import screen
 from brain import snowflake as sf
 from brain.agent import INTENTS, Teddy
 
 STATIC = Path(__file__).parent / "static"
-MOCK = "--mock" in sys.argv or os.getenv("TEDDY_MOCK") == "1"
+MOCK = "--mock" in sys.argv or os.getenv("TEDDY_MOCK") == "1"       # mock hardware
+OFFLINE = "--offline" in sys.argv or os.getenv("TEDDY_OFFLINE") == "1"  # local brain instead of Snowflake
+VOICE_ID = os.getenv("TEDDY_VOICE_ID", "XrExE9yKIg1WjnnlVkGX")  # Matilda
+TTS_MODEL = "eleven_flash_v2_5"
+MOODS = {"warm": (0.55, 0.35), "happy": (0.35, 0.6), "calm": (0.75, 0.15), "sad": (0.7, 0.3),
+         "alert": (0.4, 0.5), "urgent": (0.4, 0.5)}  # stability, style (same feel as senses/voice.py)
 
 app = FastAPI(title="Teddy")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 teddy: Teddy = None
+_clients = {}  # client id -> (asyncio.Queue, is_speaker)
+_loop = None
+_audio = {}  # id -> (bytes, mime) handed over by senses.voice's sink
+
+
+def _broadcast(msg):
+    """Thread-safe: push a message to every open screen."""
+    if _loop is None:
+        return
+    data = json.dumps(msg, default=str)
+    for q, _ in list(_clients.values()):
+        _loop.call_soon_threadsafe(q.put_nowait, data)
+
+
+def _speakers():
+    return sum(1 for _, spk in _clients.values() if spk)
+
+
+def _voice_sink(audio, mime, text, mood):
+    """senses.voice.set_sink: anything that calls voice.speak() directly also plays on the screen."""
+    if not _speakers():
+        return False
+    aid = uuid.uuid4().hex[:12]
+    _audio[aid] = (audio, mime)
+    while len(_audio) > 20:
+        _audio.pop(next(iter(_audio)))
+    _broadcast({"type": "say", "id": aid, "text": text, "mood": mood, "audio": f"/api/audio/{aid}"})
+    return True
 
 
 @app.on_event("startup")
 def _boot():
-    global teddy
-    sf.configure(mock=True if MOCK else None)
-    teddy = Teddy(mock=MOCK).start(voice=os.getenv("TEDDY_VOICE", "1") == "1")
+    global teddy, _loop
+    _loop = asyncio.get_event_loop()
+    sf.configure(mock=True if OFFLINE else None)
+    screen.set_speaker_counter(_speakers)
+    screen.subscribe(_broadcast)
+    sf.on_event(lambda ev: _broadcast({"type": "event", **ev}))
+    teddy = Teddy(mock=MOCK, screen_voice=True).start(voice=os.getenv("TEDDY_VOICE", "1") == "1")
+    if hasattr(teddy.mic, "set_sink"):
+        teddy.mic.set_sink(_voice_sink)
 
 
+# ------------------------------------------------------------------ pages
+@app.get("/")
+def screen_page():
+    return FileResponse(STATIC / "index.html")
+
+
+@app.get("/caregiver")
+def caregiver():
+    return FileResponse(STATIC / "caregiver.html")
+
+
+@app.get("/frames/{name}")
+def frame(name: str):
+    if not re.fullmatch(r"[\w.-]+\.jpg", name):
+        raise HTTPException(404)
+    path = sf.FRAMES_DIR / name
+    if not path.exists():
+        raise HTTPException(404)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+
+
+# ------------------------------------------------------------------ live stream + voice
+@app.get("/api/stream")
+async def stream(request: Request, speaker: int = 0):
+    """Server-sent events: screen changes, speech to play, and the live event feed."""
+    cid = uuid.uuid4().hex
+    q = asyncio.Queue()
+    _clients[cid] = (q, bool(speaker))
+    await q.put(json.dumps(screen.state()))
+    for ev in sf.recent_events()[-15:]:
+        await q.put(json.dumps({"type": "event", **ev}, default=str))
+
+    async def gen():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=15)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"  # keeps cloudflared + Safari from dropping the stream
+        finally:
+            _clients.pop(cid, None)
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/tts/{sid}")
+def tts(sid: str):
+    """Stream ElevenLabs (Matilda, eleven_flash_v2_5) straight to the iPad's <audio>."""
+    p = screen.speech(sid)
+    key = os.getenv("ELEVENLABS_API_KEY")
+    if not p or not key:
+        raise HTTPException(404)  # page falls back to speechSynthesis
+    stability, style = MOODS.get(p["mood"], MOODS["warm"])
+    r = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}/stream?output_format=mp3_44100_128",
+        headers={"xi-api-key": key, "Content-Type": "application/json"},
+        json={"text": p["text"], "model_id": TTS_MODEL,
+              "voice_settings": {"stability": stability, "similarity_boost": 0.75, "style": style,
+                                 "use_speaker_boost": True}},
+        stream=True, timeout=20)
+    if r.status_code != 200:
+        print(f"[web] ElevenLabs {r.status_code}: {r.text[:200]}")
+        raise HTTPException(502)
+    return StreamingResponse(r.iter_content(4096), media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/audio/{aid}")
+def audio(aid: str):
+    a = _audio.get(aid)
+    if not a:
+        raise HTTPException(404)
+    return Response(a[0], media_type=a[1], headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/spoken/{sid}")
+def spoken(sid: str):
+    screen.spoken(sid)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ controls
 class Action(BaseModel):
     intent: str
     object: str | None = None
@@ -55,16 +189,6 @@ class Question(BaseModel):
     domain: str | None = None
 
 
-@app.get("/")
-def phone():
-    return FileResponse(STATIC / "index.html")
-
-
-@app.get("/caregiver")
-def caregiver():
-    return FileResponse(STATIC / "caregiver.html")
-
-
 @app.post("/api/action")
 def action(a: Action):
     if a.intent not in INTENTS:
@@ -81,8 +205,13 @@ def say(t: Text):
 
 @app.post("/api/gesture")
 def gesture(g: Gesture):
-    """Lets the demo fake a camera gesture from the phone."""
+    """Lets the demo fake a camera gesture from the screen."""
     return teddy.on_gesture(g.model_dump(), "phone") or {"ignored": True}
+
+
+@app.get("/api/state")
+def state():
+    return {"status": teddy.status if teddy else "booting", "screen": screen.state(), "speakers": _speakers()}
 
 
 @app.get("/api/feed")
@@ -108,7 +237,8 @@ def ask(q: Question):
 @app.get("/api/health")
 def health():
     b = sf.backend()
-    return {"ok": True, "brain": b.name, "cortex_model": getattr(b, "model", None), "mock": MOCK}
+    return {"ok": True, "brain": b.name, "cortex_model": getattr(b, "model", None), "mock": MOCK,
+            "screens": len(_clients), "speakers": _speakers()}
 
 
 if __name__ == "__main__":

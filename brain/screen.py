@@ -51,6 +51,13 @@ def speech(sid):
     return _pending.get(sid)
 
 
+def hush():
+    """Stop talking now: the screen drops its audio queue and every waiting speak() returns."""
+    publish({"type": "hush"})
+    for p in list(_pending.values()):
+        p["done"].set()
+
+
 def spoken(sid):
     """The iPad finished playing speech `sid`."""
     p = _pending.get(sid)

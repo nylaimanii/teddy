@@ -62,8 +62,6 @@ def build():
         e(t, "intent", intent="mood_checkin", source="voice")
         e(t, "heard", text=text, source="voice")
         e(t, "mood", score=score, mood=mood, text=text)
-        e(t, "vitals", heart_rate=random.randint(64, 78) + (8 if mood == "in pain" else 0),
-          breathing_rate=random.randint(12, 16))
         # daytime chatter
         for _ in range(busy):
             t = at(d, random.randint(10, 20), random.randint(0, 59))
@@ -98,7 +96,6 @@ def build():
     e(t, "alert", status="fallen", text="Teddy saw Rose on the floor by the couch")
     e(t, "speak", reply="Rose, are you okay? I'm right here.")
     e(t, "heard", text="I'm alright Teddy, I just slipped. My knee hurts.")
-    e(t, "vitals", heart_rate=96, breathing_rate=20)
     e(t, "fall_check", status="ok", text="She said she was alright")
     # an unanswered check-in mid-week
     e(at(2, 15, 5), "alert", status="no_response", text="Rose didn't answer the afternoon check-in")
