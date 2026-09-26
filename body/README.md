@@ -31,13 +31,28 @@ Bench tool for fitting horns — centers and holds until ctrl-c:
 
 Poses: `neutral wave think happy sad alert listen`.
 
+Check which way every joint goes — one joint at a time, named as it moves:
+
+```
+.venv/bin/python body/check.py            # all 8
+.venv/bin/python body/check.py arm_l 0    # just these (name or servo id)
+```
+
 Try it: `python3 body/demo.py` (add `--mock` to run with no hardware, `--trace`
 to print every servo write). One keypress per gesture, `x` stops him mid-move.
 
 Notes for whoever's wiring this up:
-- All the tunables are the config block at the top of `bear.py`: `LIMITS`
-  (20–160 to start), `TRIM` (mechanical zero fudge), `DIRECTION` (flip a sign
-  if a limb goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
+- All the tunables are the config block at the top of `bear.py`: `HOME`,
+  `LIMITS`, `TRIM` (mechanical zero fudge), `DIRECTION` (flip a sign if a limb
+  goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
+- **The arms rest at 160 (left) and 20 (right), not 90.** Swinging them back
+  toward 90 fouls the legs, so `LIMITS` stops them there: `arm_l` is capped at
+  90 on the low side, `arm_r` at 90 on the high side. `sym(joint, offset)`
+  measures from `HOME`, so a gesture written once still mirrors correctly.
+- **The legs detach after every move** (`RELAX_AFTER_MOVE`). One of them
+  buzzes and shakes while holding position and is glued in, so the firmware
+  cuts them loose the moment a move finishes and re-attaches automatically on
+  the next angle sent. They go limp between moves — that is intentional.
 - Never more than 3 servos start moving on the same instant — the 4xAA pack
   can't take more. Extra joints are staggered 60 ms apart automatically.
 - Real hardware needs `pyserial` (installed in `.venv`); mock mode needs nothing.

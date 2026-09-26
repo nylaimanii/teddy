@@ -39,12 +39,21 @@ JOINTS = {
 
 NEUTRAL = 90
 
-# Per-joint safe travel. Start conservative; widen once the limbs are sewn in.
+# Where each joint rests. The arms hang out at 160/20 rather than 90: swinging
+# them back toward 90 fouls the legs, so 90 is the *end* of their travel, not
+# the middle of it.
+HOME = {name: NEUTRAL for name in JOINTS}
+HOME["arm_l"] = 160
+HOME["arm_r"] = 20
+
+# Per-joint safe travel. The arm ranges stop at 90 on purpose -- past that they
+# hit the legs. They get a little headroom beyond home so a gesture can still
+# push slightly outward.
 LIMITS = {
     "head_pan": (20, 160),
     "head_tilt": (20, 160),
-    "arm_l": (20, 160),
-    "arm_r": (20, 160),
+    "arm_l": (90, 175),     # 90 = fouls the legs; 160 = home
+    "arm_r": (5, 90),       # mirrored: 90 = fouls the legs; 20 = home
     "leg_l_side": (20, 160),
     "leg_l_kick": (20, 160),
     "leg_r_side": (20, 160),
@@ -52,21 +61,27 @@ LIMITS = {
 }
 
 # Mechanical zero fudge: added after the gesture math, before the limits.
-# If an arm hangs 10 degrees off with everything at 90, put it here.
+# If an arm hangs 10 degrees off with everything at home, put it here.
 TRIM = {name: 0 for name in JOINTS}
 
-# +1 means "bigger angle = the nice direction" (arm up, head up, head to his
-# left, leg out/forward). Mirrored joints get -1 so gestures can be written once.
+# +1 means "bigger angle = the nice direction". For the arms this points from
+# home toward 90 (their only usable travel), so sym("arm_l", 60) and
+# sym("arm_r", 60) both mean "swing the arm 60 degrees off its rest position".
 DIRECTION = {
     "head_pan": +1,    # +1 => bigger angle turns his head to HIS left
     "head_tilt": +1,   # +1 => bigger angle tilts his head UP
-    "arm_l": +1,
-    "arm_r": -1,
+    "arm_l": -1,       # home 160, swings down toward 90
+    "arm_r": +1,       # home  20, swings down toward 90
     "leg_l_side": +1,
     "leg_l_kick": -1,
     "leg_r_side": -1,
     "leg_r_kick": +1,
 }
+
+# These buzz and shake when they hold position (and one is glued in, so it
+# can't be swapped), so we cut them loose the moment a move finishes. The
+# firmware re-attaches a servo automatically when we next send it an angle.
+RELAX_AFTER_MOVE = {"leg_l_side", "leg_l_kick", "leg_r_side", "leg_r_kick"}
 
 # Camera (0..1) -> head angles. senses/ uses x to the RIGHT and y DOWN
 # (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top. The
@@ -106,7 +121,7 @@ class Body:
         self.trace = trace
         self.ser = None
         self.port = None
-        self.angles = {name: NEUTRAL for name in JOINTS}
+        self.angles = dict(HOME)
 
         if not mock:
             self.port = port or self._find_port()
@@ -164,6 +179,19 @@ class Body:
             print("[bear] serial write failed (%s) -- mock mode" % e)
             self.mock = True
 
+    def _detach(self, joints):
+        """Tell the firmware to cut these servos loose so they stop buzzing.
+        Sending them an angle later re-attaches them automatically."""
+        for joint in joints:
+            if self.mock:
+                print("[bear:mock] %-11s detach (relax)" % joint)
+            elif self.ser:
+                try:
+                    self.ser.write(b"D %d\n" % JOINTS[joint])
+                except Exception as e:
+                    print("[bear] serial write failed (%s) -- mock mode" % e)
+                    self.mock = True
+
     def _resolve(self, joint):
         if isinstance(joint, int):
             for name, jid in JOINTS.items():
@@ -179,10 +207,10 @@ class Body:
         return int(round(_clamp(angle + TRIM[joint], lo, hi)))
 
     def sym(self, joint, offset):
-        """Neutral +/- offset, respecting the joint's mirror direction.
-        sym('arm_r', 60) and sym('arm_l', 60) both mean 'arm up 60 degrees'."""
+        """Home +/- offset, respecting the joint's mirror direction.
+        sym('arm_r', 60) and sym('arm_l', 60) both mean the same swing."""
         joint = self._resolve(joint)
-        return NEUTRAL + DIRECTION[joint] * offset
+        return HOME[joint] + DIRECTION[joint] * offset
 
     # ------------------------------------------------------ motion engine ----
     def _sleep(self, seconds):
@@ -217,10 +245,12 @@ class Body:
                 "%s %d->%d" % (j, s, e) for j, s, e, _ in tracks
             ) + "  (%.2fs)" % duration)
 
+        legs = [j for j, _, _, _ in tracks if j in RELAX_AFTER_MOVE]
         total = duration + max(d for _, _, _, d in tracks)
         t0 = time.monotonic()
         while True:
             if self._cancel.is_set():
+                self._detach(legs)
                 return False
             t = time.monotonic() - t0
             done = t >= total
@@ -232,6 +262,7 @@ class Body:
                 if abs(angle - self.angles[joint]) >= MIN_STEP or p >= 1.0:
                     self._write(joint, angle)
             if done:
+                self._detach(legs)
                 return True
             time.sleep(min(TICK, total - t))
 
@@ -341,12 +372,16 @@ class Body:
             for i in range(0, len(names), MAX_SIMULTANEOUS):
                 for joint in names[i:i + MAX_SIMULTANEOUS]:
                     self.angles[joint] = None   # force the write
-                    self._write(joint, self._safe(joint, NEUTRAL))
+                    self._write(joint, self._safe(joint, HOME[joint]))
                 if not self._sleep(settle):
+                    self._detach([j for j in names[:i + MAX_SIMULTANEOUS]
+                                  if j in RELAX_AFTER_MOVE])
                     return
+            self._detach([j for j in names if j in RELAX_AFTER_MOVE])
 
         if self.mock:
-            print("[bear:mock] center: all 8 to %d" % NEUTRAL)
+            print("[bear:mock] center: all 8 to home %s"
+                  % ({j: HOME[j] for j in JOINTS},))
         return self._submit(routine, interrupt)
 
     def ping(self, timeout=1.0):
@@ -419,8 +454,8 @@ class Body:
         y = _clamp(float(y), 0.0, 1.0)
         if MIRROR_CAMERA:
             x = 1.0 - x
-        pan = NEUTRAL + DIRECTION["head_pan"] * (LOOK_PAN[0] + (LOOK_PAN[1] - LOOK_PAN[0]) * x)
-        tilt = NEUTRAL + DIRECTION["head_tilt"] * (LOOK_TILT[0] + (LOOK_TILT[1] - LOOK_TILT[0]) * y)
+        pan = HOME["head_pan"] + DIRECTION["head_pan"] * (LOOK_PAN[0] + (LOOK_PAN[1] - LOOK_PAN[0]) * x)
+        tilt = HOME["head_tilt"] + DIRECTION["head_tilt"] * (LOOK_TILT[0] + (LOOK_TILT[1] - LOOK_TILT[0]) * y)
         return pan, tilt
 
     def _both_arms(self, offset):
@@ -490,7 +525,7 @@ class Body:
         self._neutral(0.6)
 
     def _neutral(self, duration=0.6):
-        return self._transition({name: NEUTRAL for name in JOINTS}, duration)
+        return self._transition(dict(HOME), duration)
 
 
 # -------------------------------------------------------------- gestures ----
@@ -511,7 +546,8 @@ def _g_wave(b):
         if not b._transition({"arm_r": b.sym("arm_r", 68),
                               "head_pan": b.sym("head_pan", 12)}, 0.22):
             return
-    b._transition({"arm_r": NEUTRAL, "head_pan": NEUTRAL, "head_tilt": NEUTRAL}, 0.5)
+    b._transition({"arm_r": HOME["arm_r"], "head_pan": HOME["head_pan"],
+                   "head_tilt": HOME["head_tilt"]}, 0.5)
 
 
 def _g_think(b):
@@ -535,7 +571,7 @@ def _g_happy(b):
         if not b._transition(dict(b._both_arms(68),
                                   head_pan=b.sym("head_pan", 18)), 0.2):
             return
-    b._transition(dict(b._both_arms(0), head_pan=NEUTRAL,
+    b._transition(dict(b._both_arms(0), head_pan=HOME["head_pan"],
                        head_tilt=b.sym("head_tilt", 8)), 0.5)
 
 
@@ -550,7 +586,7 @@ def _g_sad(b):
 def _g_alert(b):
     # Snap upright, then a quick scan left/right.
     b._transition({"head_tilt": b.sym("head_tilt", 30),
-                   "head_pan": NEUTRAL,
+                   "head_pan": HOME["head_pan"],
                    "arm_l": b.sym("arm_l", 25)}, 0.25)
     b._transition({"arm_r": b.sym("arm_r", 25)}, 0.2)
     for pan in (35, -35, 0):
