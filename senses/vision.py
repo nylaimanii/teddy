@@ -224,6 +224,22 @@ def normalize_query(query):
     return SYNONYMS.get(q, q)
 
 
+def find_c270(max_index=5):
+    """Index of the Logitech C270. OpenCV can't read camera names, but the C270 tops out at
+    1280x720 while the MacBook and iPhone cameras default to 1920x1080. Falls back to 0."""
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if not cap.isOpened():
+            continue
+        size = (cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        if size == (1280, 720):
+            _log(f"C270 webcam is camera {i}")
+            return i
+    _log("C270 not found, using camera 0 (set TEDDY_CAM to override)")
+    return 0
+
+
 class Vision:
     def __init__(self, cam_index=None, mock=False, source=None, background=True, log_sightings=True):
         self.mock = mock
@@ -245,7 +261,8 @@ class Vision:
             else:
                 self._start(self._video_loop)
         else:
-            cam_index = int(os.getenv("TEDDY_CAM", 0)) if cam_index is None else cam_index
+            if cam_index is None:
+                cam_index = int(os.environ["TEDDY_CAM"]) if os.getenv("TEDDY_CAM") else find_c270()
             self.source = cam_index
             self._start(self._camera_loop)
         self._wait_for_frame()

@@ -3,6 +3,7 @@
     .venv/bin/python -m senses.demo            # all mock tests
     .venv/bin/python -m senses.demo detect vlm # just some
     .venv/bin/python -m senses.demo live       # real webcam + mic + speaker
+    .venv/bin/python -m senses.demo watch 180  # live log of detections/gestures/falls
 """
 import sys
 import time
@@ -154,11 +155,43 @@ def live():
     print("heard:", voice.listen(5))
 
 
+def watch(seconds=180):
+    """Live log of detections, gestures and falls; saves a frame every 5s to senses/snapshots/watch_*.jpg."""
+    import cv2
+    v = Vision(log_sightings=False)
+    v.warmup()
+    snaps = Path(__file__).resolve().parent / "snapshots"
+    snaps.mkdir(exist_ok=True)
+    t0, last_det, last_snap = time.time(), 0, 0
+    print("WATCHING", flush=True)
+    while time.time() - t0 < seconds:
+        now = time.time()
+        ts = f"[{now - t0:5.1f}s]"
+        if now - last_det > 1.0:
+            dets = [(d["label"], d["x"], d["y"], d["conf"]) for d in v.detect()]
+            if dets:
+                print(ts, "detect", dets, flush=True)
+            last_det = now
+        g = v.gestures()
+        if g:
+            print(ts, "GESTURE", g, flush=True)
+        if v.person_fallen():
+            print(ts, "FALLEN", flush=True)
+        if now - last_snap > 5:
+            cv2.imwrite(str(snaps / f"watch_{int(now - t0):03d}.jpg"), v.frame())
+            last_snap = now
+        time.sleep(0.08)
+    v.close()
+
+
 TESTS = {"detect": test_detect, "point": test_point, "fallen": test_fallen, "gestures": test_motion_gestures,
          "vlm": test_vlm, "sightings": test_sightings, "vitals": test_vitals, "voice": test_voice}
 
 if __name__ == "__main__":
     args = sys.argv[1:]
+    if args and args[0] == "watch":
+        watch(int(args[1]) if len(args) > 1 else 180)
+        sys.exit()
     if args == ["live"]:
         live()
         sys.exit()
