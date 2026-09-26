@@ -3,6 +3,8 @@
 8 SG90 servos on an Arduino Uno (pins 2–9), driven over USB serial at 115200.
 Angles are computed and eased on the Mac; `firmware/Bear.ino` just sets servos.
 
+Use the shared venv: `.venv/bin/python` (Python 3.11 — see note below).
+
 ```python
 from body.bear import Body
 
@@ -14,6 +16,8 @@ bear.cpr_beat(bpm=110, seconds=30)
 bear.stop()                # cancel and hold
 bear.wait()                # block until he's done, if you want to
 bear.relax()               # servos off — quiet, saves the AAs
+bear.center()              # force all 8 to 90 (horn alignment / known start)
+bear.ping()                # True if the firmware answers "BEAR OK"
 ```
 
 Poses: `neutral wave think happy sad alert listen`.
@@ -27,5 +31,10 @@ Notes for whoever's wiring this up:
   if a limb goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
 - Never more than 3 servos start moving on the same instant — the 4xAA pack
   can't take more. Extra joints are staggered 60 ms apart automatically.
-- Real hardware needs `pyserial`; mock mode needs nothing.
+- Real hardware needs `pyserial` (installed in `.venv`); mock mode needs nothing.
+- Run everything as `.venv/bin/python …` and install with
+  `uv pip install --python .venv/bin/python <pkg>`. `.venv/bin/pip` belongs to a
+  stray 3.14 install inside the same venv and writes where `.venv/bin/python`
+  can't see it.
+- The Uno enumerates as `/dev/cu.usbmodem1301`; `Body()` finds it on its own.
 - Flash the Uno with `firmware/upload.sh` (compiles + uploads).

@@ -138,7 +138,7 @@ class Body:
         self._worker = threading.Thread(target=self._run, name="bear-body", daemon=True)
         self._worker.start()
 
-        self.pose("neutral")
+        self.center()   # assert a known pose instead of assuming one
 
     # ---------------------------------------------------------- plumbing ----
     @staticmethod
@@ -326,6 +326,42 @@ class Body:
     def cpr_beat(self, bpm=110, seconds=30, interrupt=True):
         """Compression metronome: head nod + both arms pumping on the beat."""
         return self._submit(lambda: self._cpr(bpm, seconds), interrupt)
+
+    def center(self, settle=0.25, interrupt=True):
+        """Command every servo to neutral, three at a time.
+
+        Unlike pose("neutral") this always sends, even if we think he's already
+        there -- which is what you want for lining up the horns, and on connect
+        so his real pose matches our idea of it.
+        """
+        def routine():
+            names = list(JOINTS)
+            for i in range(0, len(names), MAX_SIMULTANEOUS):
+                for joint in names[i:i + MAX_SIMULTANEOUS]:
+                    self.angles[joint] = None   # force the write
+                    self._write(joint, self._safe(joint, NEUTRAL))
+                if not self._sleep(settle):
+                    return
+
+        if self.mock:
+            print("[bear:mock] center: all 8 to %d" % NEUTRAL)
+        return self._submit(routine, interrupt)
+
+    def ping(self, timeout=1.0):
+        """Ask the firmware to identify itself. True if it answers."""
+        if self.mock or not self.ser:
+            return False
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.write(b"P\n")
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                line = self.ser.readline().decode("ascii", "replace").strip()
+                if "BEAR" in line:
+                    return True
+        except Exception as e:
+            print("[bear] ping failed: %s" % e)
+        return False
 
     def stop(self):
         """Cancel everything and hold position."""
