@@ -18,7 +18,9 @@ const uint8_t PINS[8] = {2, 3, 4, 5, 6, 7, 8, 9};
 
 // Where each servo sits at rest. The arms hang outward at 160/20; swinging
 // them back toward 90 fouls the legs, so that is the far end of their travel.
-const uint8_t HOME[8] = {90, 90, 160, 20, 90, 90, 90, 90};
+// head_tilt rests at 110, not 90: the webcam in his hat is heavy enough to
+// pull his chin down, so he holds it 20 degrees up.
+const uint8_t HOME[8] = {90, 110, 160, 20, 90, 90, 90, 90};
 
 // Legs jitter audibly when they hold position, and one of them is glued in,
 // so they are detached whenever they are not actually moving.

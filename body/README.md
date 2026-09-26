@@ -52,6 +52,11 @@ Notes for whoever's wiring this up:
   rather than fixed degree offsets, so each joint swings as far as it safely
   can. `_overshoot()` drives past a target and falls back, which is what makes
   `wave` and `happy` read from across a room.
+- **His head rests at `head_tilt` 110, not 90** — the webcam in his hat is
+  heavy enough to pull his chin down. Everything measured from `HOME` shifts
+  with it, including the `look_at` mapping, so a target at the middle of the
+  frame still puts his face level rather than 20° low. The firmware boots to
+  the same pose, so he holds his head up before the Mac even connects.
 - **The arms rest at 160 (left) and 20 (right), not 90.** Swinging them back
   toward 90 fouls the legs, so `LIMITS` stops them there: `arm_l` is capped at
   90 on the low side, `arm_r` at 90 on the high side. `sym(joint, offset)`

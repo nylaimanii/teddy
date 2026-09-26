@@ -45,6 +45,10 @@ NEUTRAL = 90
 HOME = {name: NEUTRAL for name in JOINTS}
 HOME["arm_l"] = 160
 HOME["arm_r"] = 20
+# The webcam in his hat is heavy and pulls his chin down, so his head rests
+# 20 degrees up from centre. Everything measured from home -- neutral, idle,
+# center(), and the look_at mapping -- shifts with it, so "level" stays level.
+HOME["head_tilt"] = 110
 
 # Per-joint safe travel. The arm ranges stop at 90 on purpose -- past that they
 # hit the legs. They get a little headroom beyond home so a gesture can still
