@@ -169,6 +169,7 @@ class Body:
                 print("[bear] no Arduino found -- mock mode")
                 self.mock = True
 
+        self._io_lock = threading.Lock()   # one writer on the wire at a time
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
         self._queue = deque()
@@ -197,7 +198,8 @@ class Body:
                 print("[bear:mock] %-11s %3d" % (joint, angle))
             return
         try:
-            self.ser.write(b"%d %d\n" % (JOINTS[joint], angle))
+            with self._io_lock:
+                self.ser.write(b"%d %d\n" % (JOINTS[joint], angle))
         except Exception as e:
             print("[bear] serial write failed (%s) -- mock mode" % e)
             self.mock = True
@@ -210,7 +212,8 @@ class Body:
                 print("[bear:mock] %-11s detach (relax)" % joint)
             elif self.ser:
                 try:
-                    self.ser.write(b"D %d\n" % JOINTS[joint])
+                    with self._io_lock:
+                        self.ser.write(b"D %d\n" % JOINTS[joint])
                 except Exception as e:
                     print("[bear] serial write failed (%s) -- mock mode" % e)
                     self.mock = True
@@ -523,17 +526,24 @@ class Body:
         return self._submit(routine, interrupt)
 
     def ping(self, timeout=1.0):
-        """Ask the firmware to identify itself. True if it answers."""
+        """Ask the firmware to identify itself. True if it answers.
+
+        Waits for any motion to finish first: the worker thread is writing
+        servo commands on the same wire, and a reply can't be picked out of
+        the middle of that.
+        """
         if self.mock or not self.ser:
             return False
+        self.wait(timeout=timeout)
         try:
-            self.ser.reset_input_buffer()
-            self.ser.write(b"P\n")
-            end = time.monotonic() + timeout
-            while time.monotonic() < end:
-                line = self.ser.readline().decode("ascii", "replace").strip()
-                if "BEAR" in line:
-                    return True
+            with self._io_lock:
+                self.ser.reset_input_buffer()
+                self.ser.write(b"P\n")
+                end = time.monotonic() + timeout
+                while time.monotonic() < end:
+                    line = self.ser.readline().decode("ascii", "replace").strip()
+                    if "BEAR" in line:
+                        return True
         except Exception as e:
             print("[bear] ping failed: %s" % e)
         return False
@@ -555,7 +565,8 @@ class Body:
             print("[bear:mock] relax")
         elif self.ser:
             try:
-                self.ser.write(b"R\n")
+                with self._io_lock:
+                    self.ser.write(b"R\n")
             except Exception:
                 pass
         return self
@@ -572,10 +583,11 @@ class Body:
         self._worker.join(timeout=1.0)
         if self.ser:
             try:
-                if relax:
-                    self.ser.write(b"R\n")
-                    time.sleep(0.1)
-                self.ser.close()
+                with self._io_lock:
+                    if relax:
+                        self.ser.write(b"R\n")
+                        time.sleep(0.1)
+                    self.ser.close()
             except Exception:
                 pass
             self.ser = None
