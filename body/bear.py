@@ -387,7 +387,10 @@ class Body:
                 pass
         return self
 
-    def close(self):
+    def close(self, relax=False):
+        """Shut down. By default the servos stay powered and HOLD their angle
+        (that's what you want for fitting horns, and a limp bear looks dead).
+        Pass relax=True to cut them loose."""
         with self._cv:
             self._queue.clear()
             self._cancel.set()
@@ -396,7 +399,9 @@ class Body:
         self._worker.join(timeout=1.0)
         if self.ser:
             try:
-                self.ser.write(b"R\n")
+                if relax:
+                    self.ser.write(b"R\n")
+                    time.sleep(0.1)
                 self.ser.close()
             except Exception:
                 pass

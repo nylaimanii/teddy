@@ -18,6 +18,15 @@ bear.wait()                # block until he's done, if you want to
 bear.relax()               # servos off — quiet, saves the AAs
 bear.center()              # force all 8 to 90 (horn alignment / known start)
 bear.ping()                # True if the firmware answers "BEAR OK"
+bear.close()               # servos HOLD their angle; close(relax=True) to let go
+```
+
+Bench tool for fitting horns — centers and holds until ctrl-c:
+
+```
+.venv/bin/python body/servo.py              # all 8 to 90, hold
+.venv/bin/python body/servo.py 0            # wiggle servo 0, back to 90, hold
+.venv/bin/python body/servo.py head_pan 40  # one joint to one angle, hold
 ```
 
 Poses: `neutral wave think happy sad alert listen`.
@@ -38,3 +47,10 @@ Notes for whoever's wiring this up:
   can't see it.
 - The Uno enumerates as `/dev/cu.usbmodem1301`; `Body()` finds it on its own.
 - Flash the Uno with `firmware/upload.sh` (compiles + uploads).
+- **The Uno reboots whenever the serial port opens or closes**, which snaps
+  every servo to 90. So `echo "0 40" > /dev/cu.usbmodem1301` never works: the
+  board is still in its bootloader when the bytes land, and the shell closes
+  the port before the sketch is running. Open the port, wait ~2 s, then send —
+  that is what `Body.__init__` does. To hold a non-90 angle you must keep the
+  port open, which is why `servo.py` idles instead of exiting.
+- The firmware never detaches on its own; it only relaxes on an explicit `R`.
