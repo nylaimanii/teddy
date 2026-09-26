@@ -83,6 +83,17 @@ DIRECTION = {
 # firmware re-attaches a servo automatically when we next send it an angle.
 RELAX_AFTER_MOVE = {"leg_l_side", "leg_l_kick", "leg_r_side", "leg_r_kick"}
 
+# The arms have the hardest job in the bear: they push the most fabric and
+# stuffing, and they are the first thing to look weak when the battery sags.
+# So an arm move gets the pack to itself -- no other servo moves with it -- and
+# a moment of dwell afterwards to finish shoving the fabric out of the way
+# before we ask it for anything else.
+ARM_JOINTS = {"arm_l", "arm_r"}
+ARM_EXCLUSIVE = True    # arms never move at the same instant as anything else
+ARM_SETTLE = 0.16       # seconds of hold after every arm move
+ARMS_ONE_AT_A_TIME = False   # True = left and right arms take turns too
+                             # (flip this if both-arms-at-once still sags)
+
 # Camera (0..1) -> head angles. senses/ uses x to the RIGHT and y DOWN
 # (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top. The
 # camera rides in his hat facing the way he faces, so frame-left is his left.
@@ -279,7 +290,70 @@ class Body:
             return False
         return self._transition(targets, settle)
 
-    def _transition(self, targets, duration=0.5):
+    def _transition(self, targets, duration=0.5, strict=False):
+        """Ease every joint in `targets` to its target, giving the arms the
+        power pack to themselves.
+
+        If a move mixes arms with anything else, it is split into consecutive
+        blocks -- arms first, then the rest -- so an arm never shares the
+        battery with another servo. Each arm block is followed by ARM_SETTLE
+        seconds of hold so the servo can finish pushing the fabric.
+
+        strict=True keeps the total inside `duration` and skips the hold, for
+        callers whose timing is the point (cpr_beat's metronome).
+        """
+        if not ARM_EXCLUSIVE:
+            return self._move_block(targets, duration)
+
+        blocks = self._split_for_arms(targets)
+        if len(blocks) == 1 and not (blocks[0][1] and ARM_SETTLE):
+            return self._move_block(blocks[0][0], duration)
+
+        if strict:
+            # Divide the caller's budget by how far each block has to travel,
+            # so the beat lands exactly where it would have.
+            spans = [max(1, self._span(t)) for t, _ in blocks]
+            total = float(sum(spans))
+            for (chunk, _), span in zip(blocks, spans):
+                if not self._move_block(chunk, max(0.02, duration * span / total)):
+                    return False
+            return True
+
+        for chunk, is_arm in blocks:
+            span = self._span(chunk)
+            if not self._move_block(chunk, max(MIN_DURATION,
+                                               span / MAX_DEG_PER_SEC)):
+                return False
+            if is_arm and ARM_SETTLE and not self._sleep(ARM_SETTLE):
+                return False
+        return True
+
+    def _span(self, targets):
+        """Biggest distance any joint in `targets` has to travel, in degrees."""
+        worst = 0
+        for joint, raw in targets.items():
+            joint = self._resolve(joint)
+            now = self.angles.get(joint)
+            if now is not None:
+                worst = max(worst, abs(self._safe(joint, raw) - now))
+        return worst
+
+    def _split_for_arms(self, targets):
+        """[(targets, is_arm_block)] -- arms first, alone, then everything else."""
+        arms, rest = {}, {}
+        for joint, raw in targets.items():
+            name = self._resolve(joint)
+            (arms if name in ARM_JOINTS else rest)[name] = raw
+        blocks = []
+        if arms and ARMS_ONE_AT_A_TIME:
+            blocks += [({j: v}, True) for j, v in arms.items()]
+        elif arms:
+            blocks.append((arms, True))
+        if rest:
+            blocks.append((rest, False))
+        return blocks or [(dict(targets), False)]
+
+    def _move_block(self, targets, duration=0.5):
         """Ease every joint in `targets` (name -> raw angle) to its target.
 
         Joints are started in batches of MAX_SIMULTANEOUS, STAGGER apart, so the
@@ -424,9 +498,13 @@ class Body:
         so his real pose matches our idea of it.
         """
         def routine():
-            names = list(JOINTS)
+            # non-arm joints in batches of three, then the arms on their own
+            names = [j for j in JOINTS if j not in ARM_JOINTS] + sorted(ARM_JOINTS)
             for i in range(0, len(names), MAX_SIMULTANEOUS):
-                for joint in names[i:i + MAX_SIMULTANEOUS]:
+                batch = names[i:i + MAX_SIMULTANEOUS]
+                if ARM_EXCLUSIVE and any(j in ARM_JOINTS for j in batch):
+                    batch = [j for j in batch if j in ARM_JOINTS]
+                for joint in batch:
                     self.angles[joint] = None   # force the write
                     self._write(joint, self._safe(joint, HOME[joint]))
                 if not self._sleep(settle):
@@ -582,22 +660,37 @@ class Body:
         self._snap(dict(HOME), scale=1.6)
 
     def _cpr(self, bpm=110, seconds=30):
+        """Compression metronome: head nod + both arms pumping on the beat.
+
+        Every beat is timed against an absolute schedule rather than by adding
+        up durations, so the per-move overhead (the arms now move in their own
+        block, which costs a few ms each) can never accumulate into a drift.
+        The tempo is the whole point of this gesture.
+        """
         period = 60.0 / max(40.0, min(160.0, float(bpm)))
-        down, up = period * 0.4, period * 0.6
         beats = max(1, int(seconds / period))
-        # Ready position: arms out front, head slightly down, looking at "them".
+
+        # Ready position: arms out front, head down, looking at "them".
         if not self._snap(dict(self._both_arms_reach(0.45),
                                head_tilt=self.reach("head_tilt", -0.2))):
             return
+
+        t0 = time.monotonic()
         for i in range(beats):
-            # press: arms down + head nods down (3 servos exactly)
-            # deeper press than before so it reads through the stuffing;
-            # the tempo is what matters, so these keep their exact durations
+            press_at = t0 + i * period
+            release_at = press_at + period * 0.4
+            next_at = t0 + (i + 1) * period
+
+            # press: arms drive down hard, head nods with them
+            down = max(0.05, release_at - time.monotonic())
             if not self._transition(dict(self._both_arms_reach(0.9),
-                                         head_tilt=self.reach("head_tilt", -0.6)), down):
+                                         head_tilt=self.reach("head_tilt", -0.6)),
+                                    down, strict=True):
                 return
+            up = max(0.05, next_at - time.monotonic())
             if not self._transition(dict(self._both_arms_reach(0.35),
-                                         head_tilt=self.reach("head_tilt", -0.05)), up):
+                                         head_tilt=self.reach("head_tilt", -0.05)),
+                                    up, strict=True):
                 return
         self._snap(dict(HOME), scale=1.6)
 

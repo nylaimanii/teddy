@@ -56,6 +56,14 @@ Notes for whoever's wiring this up:
   toward 90 fouls the legs, so `LIMITS` stops them there: `arm_l` is capped at
   90 on the low side, `arm_r` at 90 on the high side. `sym(joint, offset)`
   measures from `HOME`, so a gesture written once still mirrors correctly.
+- **An arm move gets the battery to itself.** The arms push the most fabric
+  and are the first thing to sag when the pack droops, so any move that mixes
+  an arm with another joint is split into consecutive blocks — arms first,
+  alone — and each arm block is followed by `ARM_SETTLE` (0.16 s) of hold so
+  the servo can finish shoving the stuffing before it is asked for anything
+  else. `ARMS_ONE_AT_A_TIME = True` makes the left and right arms take turns
+  as well, if both together still sag. `cpr_beat` opts out of the hold
+  (`strict=True`) because its tempo is the point.
 - **The legs detach after every move** (`RELAX_AFTER_MOVE`). One of them
   buzzes and shakes while holding position and is glued in, so the firmware
   cuts them loose the moment a move finishes and re-attaches automatically on
