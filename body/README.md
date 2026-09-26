@@ -1,0 +1,31 @@
+# body/ — the bear's movement
+
+8 SG90 servos on an Arduino Uno (pins 2–9), driven over USB serial at 115200.
+Angles are computed and eased on the Mac; `firmware/Bear.ino` just sets servos.
+
+```python
+from body.bear import Body
+
+bear = Body()              # auto-finds the Uno; falls back to mock if absent
+bear.pose("listen")        # returns immediately, he keeps moving
+bear.point_at(0.8, 0.4)    # camera coords -> head + the arm on that side
+bear.dance(10)
+bear.cpr_beat(bpm=110, seconds=30)
+bear.stop()                # cancel and hold
+bear.wait()                # block until he's done, if you want to
+bear.relax()               # servos off — quiet, saves the AAs
+```
+
+Poses: `neutral wave think happy sad alert listen`.
+
+Try it: `python3 body/demo.py` (add `--mock` to run with no hardware, `--trace`
+to print every servo write). One keypress per gesture, `x` stops him mid-move.
+
+Notes for whoever's wiring this up:
+- All the tunables are the config block at the top of `bear.py`: `LIMITS`
+  (20–160 to start), `TRIM` (mechanical zero fudge), `DIRECTION` (flip a sign
+  if a limb goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
+- Never more than 3 servos start moving on the same instant — the 4xAA pack
+  can't take more. Extra joints are staggered 60 ms apart automatically.
+- Real hardware needs `pyserial`; mock mode needs nothing.
+- Flash the Uno with `firmware/upload.sh` (compiles + uploads).
