@@ -1,0 +1,5 @@
+models/
+local_sightings.json
+__pycache__/
+*.pyc
+/tmp/

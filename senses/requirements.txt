@@ -1,0 +1,9 @@
+ultralytics
+git+https://github.com/ultralytics/CLIP.git
+faster-whisper
+sounddevice
+mediapipe==0.10.21
+opencv-python
+numpy
+requests
+python-dotenv
