@@ -495,7 +495,9 @@ class Vision:
             box = res.boxes.xyxy[i].tolist()
             self._pose_hist.append((t, k, box, (w, h)))
             self._last_person_t = t
-            if _is_fallen_pose(k, box):
+            if not _solid_body(k, box, w, h):
+                pass  # partial/blurry body: fine for gestures, too weak to call a fall either way
+            elif _is_fallen_pose(k, box):
                 self._fallen_since = self._fallen_since or t
             else:
                 self._fallen_since = None
@@ -522,8 +524,10 @@ class Vision:
         for rot in (cv2.ROTATE_90_COUNTERCLOCKWISE, cv2.ROTATE_90_CLOCKWISE):
             with _gpu_lock:
                 r = model.predict(cv2.rotate(img, rot), conf=0.5, device=_device(), verbose=False)[0]
-            if len(r.boxes):
-                return True
+            rh, rw = r.orig_shape
+            for k, box in zip(r.keypoints.data.cpu().numpy(), r.boxes.xyxy.tolist()):
+                if _solid_body(k, box, rw, rh) and not _is_fallen_pose(k, box):
+                    return True  # upright once rotated = horizontal in the real frame
         return False
 
     def person_fallen(self, hold=2.0):
@@ -573,6 +577,15 @@ def _angle(a, b, c):
     v1, v2 = a - b, c - b
     cos = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
     return math.degrees(math.acos(np.clip(cos, -1, 1)))
+
+
+def _solid_body(k, box, w, h):
+    """A real, clearly seen torso: both shoulders and hips plus 8+ confident keypoints, and a box
+    that isn't the whole frame (empty walls/ceilings produce frame-sized ghosts with no keypoints)."""
+    good = k[:, 2] > 0.5
+    if good.sum() < 8 or not all(good[[L_SH, R_SH, L_HIP, R_HIP]]):
+        return False
+    return (box[2] - box[0]) * (box[3] - box[1]) < 0.85 * w * h
 
 
 def _is_fallen_pose(k, box):
