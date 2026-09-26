@@ -68,10 +68,12 @@ DIRECTION = {
     "leg_r_kick": +1,
 }
 
-# Camera (0..1) -> head angles. x=0 is the left edge of the frame.
-MIRROR_CAMERA = False   # True if senses/ hands us a selfie-mirrored frame
-LOOK_PAN = (55, -55)    # offset from neutral at x=0 and x=1
-LOOK_TILT = (35, -35)   # offset from neutral at y=0 (top) and y=1 (bottom)
+# Camera (0..1) -> head angles. senses/ uses x to the RIGHT and y DOWN
+# (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top. The
+# camera rides in his hat facing the way he faces, so frame-left is his left.
+MIRROR_CAMERA = False   # True if senses/ ever hands us a selfie-mirrored frame
+LOOK_PAN = (55, -55)    # offset from neutral at x=0 (his left) and x=1
+LOOK_TILT = (35, -35)   # offset from neutral at y=0 (top, look up) and y=1
 
 MAX_SIMULTANEOUS = 3    # servos allowed to start moving on the same instant
 STAGGER = 0.06          # seconds between one batch of 3 and the next
