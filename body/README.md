@@ -54,3 +54,24 @@ Notes for whoever's wiring this up:
   that is what `Body.__init__` does. To hold a non-90 angle you must keep the
   port open, which is why `servo.py` idles instead of exiting.
 - The firmware never detaches on its own; it only relaxes on an explicit `R`.
+
+## Power — read this before blaming the code
+
+**The servos must have their own 4xAA pack. They cannot run off the Uno's 5V
+pin.** When the Uno is USB-powered, its 5V pin is fed from the USB line through
+a 500 mA polyfuse. One SG90 draws ~250–400 mA while moving and stalls near
+700 mA; eight of them are several amps. The fuse trips, the board browns out,
+and the symptoms look like software bugs:
+
+- serial goes silent, `ping()` returns nothing
+- `arduino-cli upload` fails with `not in sync: resp=0x00`
+- the USB port vanishes mid-upload and re-enumerates seconds later
+
+Wiring: battery **+** to the servo V+ rail, battery **−** to the servo ground
+rail **and** to an Arduino GND pin — the grounds must be common or the signal
+wires have no reference. Signal wires go to pins 2–9. Do **not** feed 6 V into
+the Arduino's 5 V pin; leave the Uno on USB.
+
+4×AA alkaline is 6 V fresh, within the SG90's 4.8–6 V range, and sags under
+load — which is the other reason `MAX_SIMULTANEOUS` is 3. A 470–1000 µF
+capacitor across the servo rail smooths the current spikes.
