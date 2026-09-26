@@ -1,19 +1,32 @@
--- Parse every staged PDF with AI_PARSE_DOCUMENT (LAYOUT), chunk 1500/200, build the DOC_SEARCH service.
--- Domain = filename prefix before "__", e.g. cpr__aha_guide.pdf -> cpr. No prefix -> general.
+-- Turn every staged doc into searchable chunks and (re)build the DOC_SEARCH service.
+--   PDFs         -> AI_PARSE_DOCUMENT (LAYOUT)
+--   .txt / .md   -> read straight off the stage, one row per line, stitched back together
+-- Domain = filename prefix before "__", e.g. first_aid__red_cross_burns.md -> first_aid. No prefix -> general.
+-- Text files may start with "Source: <url>"; that URL rides along on every chunk for citations.
 USE WAREHOUSE {WH};
 USE SCHEMA TEDDY.CORE;
 ALTER STAGE DOCS REFRESH;
+
+CREATE OR REPLACE FILE FORMAT TXT_LINES
+  TYPE = CSV FIELD_DELIMITER = NONE RECORD_DELIMITER = '\n' ESCAPE_UNENCLOSED_FIELD = NONE
+  SKIP_BLANK_LINES = FALSE TRIM_SPACE = FALSE;
 
 CREATE OR REPLACE TABLE DOC_PAGES AS
 SELECT RELATIVE_PATH AS FILE,
        AI_PARSE_DOCUMENT(TO_FILE('@TEDDY.CORE.DOCS', RELATIVE_PATH), {'mode': 'LAYOUT'}):content::STRING AS TEXT
 FROM DIRECTORY(@DOCS)
-WHERE RELATIVE_PATH ILIKE '%.pdf';
+WHERE RELATIVE_PATH ILIKE '%.pdf'
+UNION ALL
+SELECT METADATA$FILENAME AS FILE,
+       LISTAGG(NVL($1, ''), '\n') WITHIN GROUP (ORDER BY METADATA$FILE_ROW_NUMBER) AS TEXT
+FROM @DOCS (FILE_FORMAT => 'TEDDY.CORE.TXT_LINES', PATTERN => '.*[.](txt|md)')
+GROUP BY METADATA$FILENAME;
 
 CREATE OR REPLACE TABLE DOC_CHUNKS AS
 SELECT p.FILE,
-       REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.FILE, '\\.pdf$', '', 1, 0, 'i'), '^.*__', ''), '_', ' ') AS TITLE,
+       REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(p.FILE, '[.](pdf|md|txt)$', '', 1, 0, 'i'), '^.*__', ''), '_', ' ') AS TITLE,
        LOWER(IFF(CONTAINS(p.FILE, '__'), SPLIT_PART(p.FILE, '__', 1), 'general')) AS DOMAIN,
+       REGEXP_SUBSTR(p.TEXT, '^Source: *(\\S+)', 1, 1, 'e') AS SOURCE_URL,
        c.INDEX AS CHUNK_NO,
        c.VALUE::STRING AS CHUNK
 FROM DOC_PAGES p,
@@ -24,4 +37,4 @@ CREATE OR REPLACE CORTEX SEARCH SERVICE DOC_SEARCH
   ATTRIBUTES DOMAIN, TITLE
   WAREHOUSE = {WH}
   TARGET_LAG = '1 day'
-AS SELECT CHUNK, DOMAIN, TITLE, FILE FROM DOC_CHUNKS;
+AS SELECT CHUNK, DOMAIN, TITLE, FILE, SOURCE_URL FROM DOC_CHUNKS;

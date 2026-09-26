@@ -129,13 +129,17 @@ class SnowflakeBackend:
     def upload_frame(self, path):
         self.query(f"PUT 'file://{path}' @TEDDY.CORE.FRAMES AUTO_COMPRESS=FALSE OVERWRITE=TRUE")
 
-    def complete(self, prompt):
-        """AI_COMPLETE with llama3.3-70b, falling back to mistral-large2."""
+    def complete(self, prompt, temperature=None):
+        """AI_COMPLETE with llama3.3-70b, falling back to the next model on error or timeout."""
         models = [self.model] + [m for m in CORTEX_MODELS if m != self.model] if self.model else CORTEX_MODELS
         last = None
         for m in models:
             try:
-                out = self.query("SELECT AI_COMPLETE(%s, %s) AS R", (m, prompt), timeout=25)[0]["r"]
+                if temperature is None:
+                    out = self.query("SELECT AI_COMPLETE(%s, %s) AS R", (m, prompt), timeout=25)[0]["r"]
+                else:
+                    out = self.query("SELECT AI_COMPLETE(%s, %s, OBJECT_CONSTRUCT('temperature', %s::FLOAT)) AS R",
+                                     (m, prompt, temperature), timeout=25)[0]["r"]
                 self.model = m
                 out = out.strip()
                 if out.startswith('"'):  # AI_COMPLETE hands back a JSON-encoded string
@@ -149,9 +153,9 @@ class SnowflakeBackend:
                 last = e
         raise RuntimeError(f"No Cortex model available: {last}")
 
-    def search(self, question, domain=None, k=4):
+    def search(self, question, domain=None, k=5):
         """Cortex Search retrieval -> [{"chunk","title","domain"}] (SEARCH_PREVIEW over DOC_SEARCH)."""
-        req = {"query": question, "columns": ["CHUNK", "TITLE", "DOMAIN"], "limit": k}
+        req = {"query": question, "columns": ["CHUNK", "TITLE", "DOMAIN", "SOURCE_URL"], "limit": k}
         if domain:
             req["filter"] = {"@eq": {"DOMAIN": domain}}
         r = self.query("SELECT SNOWFLAKE.CORTEX.SEARCH_PREVIEW(%s, %s) AS R", (SEARCH_SERVICE, json.dumps(req)),
@@ -245,13 +249,13 @@ class LocalBackend:
                                  "VALUES (?,?,?,?,?,?,?)", rows)
             self._db.commit()
 
-    def complete(self, prompt):
-        return ollama(prompt, temperature=0.2)
+    def complete(self, prompt, temperature=None):
+        return ollama(prompt, temperature=0.2 if temperature is None else temperature)
 
     def search(self, question, domain=None, k=4):
         words = set(re.findall(r"[a-z]{3,}", question.lower()))
         docs = list(_OFFLINE_DOCS)
-        for f in (ROOT / "data" / "docs").glob("*.txt"):
+        for f in [*(ROOT / "data" / "docs").glob("*.txt"), *(ROOT / "data" / "docs").glob("*.md")]:
             d = f.name.split("__")[0] if "__" in f.name else "general"
             docs += [(d, f.stem, p) for p in f.read_text().split("\n\n") if p.strip()]
         scored = []
@@ -460,8 +464,8 @@ def describe_time(ts):
     return f"{day} at {t.strftime('%-I:%M %p')}"
 
 
-def complete(prompt):
-    return backend().complete(prompt)
+def complete(prompt, temperature=None):
+    return backend().complete(prompt, temperature)
 
 
 def ask_detailed(question, domain=None):
@@ -473,36 +477,39 @@ def ask_detailed(question, domain=None):
     except Exception as e:
         print(f"[brain] search failed: {e}")
         hits = []
-    source = None
+    source = url = None
     if not hits:
         ans = NOT_SURE
     else:
         sources = "\n\n".join(f"SOURCE {i + 1} ({h.get('title', '')}):\n{h['chunk']}" for i, h in enumerate(hits))
+        # Question first: with it up top llama3.3-70b pulls the concrete steps instead of echoing
+        # whichever chunk ranked first (tested on choking / CPR rate / burns).
         prompt = (
-            "You are Teddy, a gentle teddy bear speaking out loud to a child or an older adult.\n"
-            "Answer the question using ONLY the sources below. If they do not answer it, reply exactly: "
-            f"\"{NOT_SURE}\" and then on a new line: SOURCE: 0\n"
-            "Rules: at most 3 short sentences, simple words, no lists, no markdown. "
-            "For anything medical or dangerous, start with 'Call 911' when it could be an emergency.\n"
-            "After the answer, on its own line, write SOURCE: and the number of the source you used most.\n\n"
-            f"{sources}\n\nQUESTION: {question}\nTEDDY SAYS:")
+            f"QUESTION: {question}\n\n"
+            "You are Teddy, a gentle teddy bear talking out loud to a child or an older adult. Using ONLY these "
+            "sources, answer the question above in at most 3 short, simple spoken sentences with the specific "
+            "actions and numbers. No lists or markdown. Start with 'Call 911' only if someone may be in danger right now. "
+            f"If the sources don't answer it, reply exactly: \"{NOT_SURE}\"\n"
+            "End with a line: SOURCE: <number of the source you used most>\n\n"
+            f"{sources}\n\nTEDDY SAYS:")
         try:
-            raw = b.complete(prompt)
-            m = re.search(r"SOURCE:?\s*(\d+)", raw, re.I)
+            raw = b.complete(prompt, temperature=0)
+            m = re.search(r"(?:^|\n)\s*\**SOURCE\**:?\s*\**(\d+)\**\s*$", raw.strip(), re.I)
             n = int(m.group(1)) if m else 1
-            ans = _spoken(re.sub(r"\n?\s*SOURCE:?.*$", "", raw, flags=re.I | re.S)) or NOT_SURE
+            ans = _spoken(raw.strip()[:m.start()] if m else raw) or NOT_SURE
             if NOT_SURE.split(".")[0].lower() in ans.lower() or n == 0:
                 ans = NOT_SURE
             else:
-                source = hits[min(max(n, 1), len(hits)) - 1].get("title")
+                hit = hits[min(max(n, 1), len(hits)) - 1]
+                source, url = hit.get("title"), hit.get("source_url")
         except Exception as e:
             print(f"[brain] complete failed: {e}")
             ans = NOT_SURE
     spoken = f"{ans} That's from the {source}." if source else ans
-    out = {"answer": spoken, "text": ans, "source": source, "sources": [h.get("title") for h in hits],
+    out = {"answer": spoken, "text": ans, "source": source, "url": url, "sources": [h.get("title") for h in hits],
            "domain": domain, "engine": b.name, "model": getattr(b, "model", None) or OLLAMA_MODEL,
            "ms": int((time.time() - t0) * 1000)}
-    log_event("ask", {"text": question, "domain": domain, "reply": spoken, "source": source})
+    log_event("ask", {"text": question, "domain": domain, "reply": spoken, "source": source, "url": url})
     return out
 
 

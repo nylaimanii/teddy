@@ -38,18 +38,20 @@ def setup(b):
 
 
 def docs(b):
-    pdfs = sorted(DOCS.glob("*.pdf"))
-    print(f"3) Uploading {len(pdfs)} PDFs from data/docs")
-    if not pdfs:
-        print("   No PDFs yet. Name them like cpr__aha_guide.pdf, first_aid__redcross.pdf, homework__fractions.pdf")
+    docs = sorted(f for ext in ("pdf", "txt", "md") for f in DOCS.glob(f"*.{ext}"))
+    print(f"3) Uploading {len(docs)} docs (PDF/txt/md) from data/docs")
+    if not docs:
+        print("   No docs yet. Name them like cpr__aha_guide.pdf, first_aid__red_cross_burns.md, homework__fractions.pdf")
         return
-    for p in pdfs:
+    b.query("REMOVE @TEDDY.CORE.DOCS")  # stage mirrors the folder, so deleted docs leave the index too
+    for p in docs:
         print(f"   PUT {p.name}")
         b.query(f"PUT 'file://{p}' @TEDDY.CORE.DOCS AUTO_COMPRESS=FALSE OVERWRITE=TRUE")
-    print("4) AI_PARSE_DOCUMENT (LAYOUT) -> 1500/200 chunks -> DOC_SEARCH service (a minute or two)")
+    print("4) AI_PARSE_DOCUMENT (PDF) + staged text (txt/md) -> 1500/200 chunks -> DOC_SEARCH (a minute or two)")
     run_file(b, SQL / "ingest_docs.sql")
-    for r in b.query("SELECT DOMAIN, COUNT(*) AS N FROM DOC_CHUNKS GROUP BY 1 ORDER BY 1"):
-        print(f"   {r['domain']}: {r['n']} chunks")
+    for r in b.query("SELECT DOMAIN, TITLE, COUNT(*) AS N, ANY_VALUE(SOURCE_URL) AS URL FROM DOC_CHUNKS "
+                     "GROUP BY 1, 2 ORDER BY 1, 2"):
+        print(f"   {r['domain']:10s} {r['n']:3d} chunks  {r['title']}" + (f"  <{r['url']}>" if r['url'] else ""))
 
 
 def models(b):
@@ -72,9 +74,11 @@ def models(b):
 
 def smoke(b):
     print("6) Smoke test ask()")
-    for q, d in [("How fast do I push during CPR?", "cpr"), ("What do I do for a burn?", "first_aid")]:
+    for q, d in [("How fast do I push during CPR?", "cpr"), ("What do I do for a burn?", "first_aid"),
+                 ("Someone is choking and can't talk, what do I do?", "first_aid"),
+                 ("How can grandma avoid falling at home?", "first_aid"), ("Should I put ice on a burn?", None)]:
         r = sf.ask_detailed(q, d)
-        print(f"   Q: {q}\n   A: {r['answer']}  [{r['model']}, {r['ms']}ms]")
+        print(f"   Q: {q}\n   A: {r['answer']}  [{r['model']}, {r['ms']}ms, {r.get('url') or ''}]")
 
 
 if __name__ == "__main__":
