@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>Teddy Remote</title>
+<style>
+  :root {
+    --bg: #000; --fg: #fff; --muted: #d6d6d6; --card: #151515; --line: #444;
+    --yellow: #ffd60a; --on-yellow: #000; --blue: #7cc4ff; --red: #c8102e; --green: #3ddc84;
+    --radius: 22px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font: 600 21px/1.35 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    min-height: 100dvh; display: flex; flex-direction: column;
+    padding: env(safe-area-inset-top) 16px calc(16px + env(safe-area-inset-bottom));
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 8px; }
+  h1 { font-size: 30px; margin: 0; }
+  #state { font-size: 17px; color: var(--muted); }
+  .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--green); margin-right: 6px; }
+  .busy .dot { background: var(--yellow); }
+
+  /* live feed: top half, scrolls; controls sit in the thumb zone below */
+  #feed {
+    flex: 1 1 auto; min-height: 120px; max-height: 34dvh; overflow-y: auto; margin: 0 0 12px;
+    list-style: none; padding: 12px; background: var(--card); border: 2px solid var(--line); border-radius: var(--radius);
+  }
+  #feed li { padding: 8px 4px; border-bottom: 1px solid #2a2a2a; }
+  #feed li:last-child { border-bottom: 0; }
+  #feed .who { color: var(--yellow); }
+  #feed .you .who { color: var(--blue); }
+  #feed .alert { color: #fff; background: var(--red); border-radius: 12px; padding: 10px; }
+  #feed .meta { color: var(--muted); font-size: 16px; font-weight: 500; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button, .btn {
+    font: inherit; font-size: 23px; color: var(--on-yellow); background: var(--yellow);
+    border: 0; border-radius: var(--radius); min-height: 92px; padding: 12px; width: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    cursor: pointer; touch-action: manipulation; text-decoration: none; text-align: center;
+  }
+  button .ico, .btn .ico { font-size: 34px; line-height: 1; }
+  button:active { transform: scale(.97); }
+  button:focus-visible, .btn:focus-visible, input:focus-visible { outline: 5px solid var(--blue); outline-offset: 3px; }
+  .wide { grid-column: 1 / -1; }
+  .cpr { background: var(--red); color: #fff; min-height: 104px; font-size: 26px; }
+  .secondary { background: #fff; color: #000; }
+  #stop { background: #fff; color: #000; display: none; min-height: 80px; margin-bottom: 12px; font-size: 26px; }
+  .busy #stop { display: flex; }
+
+  form.talk { display: flex; gap: 10px; margin-top: 12px; }
+  input[type=text] {
+    flex: 1; min-width: 0; font: inherit; font-size: 21px; padding: 0 16px; min-height: 64px;
+    border-radius: 16px; border: 3px solid var(--fg); background: #000; color: #fff;
+  }
+  form.talk button { width: auto; min-height: 64px; padding: 0 18px; font-size: 20px; }
+  #mic[hidden] { display: none; }
+
+  dialog { background: #000; color: #fff; border: 3px solid var(--yellow); border-radius: var(--radius);
+           width: min(100vw - 24px, 520px); padding: 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.8); }
+  dialog h2 { margin: 0 0 14px; font-size: 26px; }
+  dialog .grid button { min-height: 80px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  label.toggle { display: flex; gap: 10px; align-items: center; font-size: 17px; color: var(--muted); margin-top: 12px; }
+  label.toggle input { width: 28px; height: 28px; }
+  footer { font-size: 15px; color: var(--muted); margin-top: 10px; text-align: center; }
+  footer a { color: var(--blue); }
+  @media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span aria-hidden="true">🧸</span> Teddy</h1>
+  <div id="state" role="status"><span class="dot" aria-hidden="true"></span><span id="stateText">Connecting…</span></div>
+</header>
+
+<h2 class="sr">What Teddy is saying</h2>
+<ul id="feed" aria-live="polite" aria-relevant="additions" aria-label="Teddy's conversation, newest at the bottom"></ul>
+
+<button id="stop" type="button" aria-label="Stop Teddy"><span class="ico" aria-hidden="true">✋</span>Stop</button>
+
+<main class="grid" aria-label="Ask Teddy to do something">
+  <button type="button" id="findBtn" aria-haspopup="dialog"><span class="ico" aria-hidden="true">🔍</span>Find my…</button>
+  <button type="button" data-intent="read"><span class="ico" aria-hidden="true">📖</span>Read this</button>
+  <button type="button" data-intent="fall_check"><span class="ico" aria-hidden="true">💛</span>Check on me</button>
+  <button type="button" data-intent="dance"><span class="ico" aria-hidden="true">💃</span>Dance</button>
+  <button type="button" data-intent="identify" class="secondary"><span class="ico" aria-hidden="true">👀</span>What's this?</button>
+  <button type="button" data-intent="mood_checkin" class="secondary"><span class="ico" aria-hidden="true">🙂</span>How I feel</button>
+  <button type="button" data-intent="cpr_coach" class="cpr wide" aria-label="CPR mode. Teddy will coach you through chest compressions. Call 911 too.">
+    <span class="ico" aria-hidden="true">❤️</span>CPR mode</button>
+  <a class="btn cpr wide" href="tel:911" aria-label="Call 911"><span class="ico" aria-hidden="true">📞</span>Call 911</a>
+</main>
+
+<form class="talk" id="talk" aria-label="Say something to Teddy">
+  <label class="sr" for="talkText">Message to Teddy</label>
+  <input id="talkText" type="text" autocomplete="off" enterkeyhint="send" placeholder="Say something to Teddy…">
+  <button type="button" id="mic" hidden aria-label="Speak to Teddy with your voice"><span aria-hidden="true">🎤</span></button>
+  <button type="submit" aria-label="Send message">Send</button>
+</form>
+<label class="toggle"><input type="checkbox" id="readAloud"> Read Teddy's replies aloud on this phone</label>
+<footer><a href="/caregiver">Caregiver dashboard</a></footer>
+
+<dialog id="findDlg" aria-labelledby="findTitle">
+  <h2 id="findTitle">What should Teddy find?</h2>
+  <div class="grid">
+    <button type="button" data-find="keys"><span class="ico" aria-hidden="true">🔑</span>Keys</button>
+    <button type="button" data-find="glasses"><span class="ico" aria-hidden="true">👓</span>Glasses</button>
+    <button type="button" data-find="phone"><span class="ico" aria-hidden="true">📱</span>Phone</button>
+    <button type="button" data-find="remote"><span class="ico" aria-hidden="true">📺</span>Remote</button>
+    <button type="button" data-find="wallet"><span class="ico" aria-hidden="true">👛</span>Wallet</button>
+    <button type="button" data-find="pill bottle"><span class="ico" aria-hidden="true">💊</span>Pills</button>
+  </div>
+  <form id="findOther" class="talk">
+    <label class="sr" for="findText">Something else</label>
+    <input id="findText" type="text" placeholder="Something else…" autocomplete="off" enterkeyhint="search">
+    <button type="submit">Find</button>
+  </form>
+  <button type="button" class="secondary" id="findClose" style="margin-top:12px;min-height:64px">Cancel</button>
+</dialog>
+
+<script>
+const $ = s => document.querySelector(s);
+const feed = $('#feed');
+let after = 0, lastStatus = '';
+
+const post = (url, body) => fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
+  .catch(() => note('Teddy is not reachable right now.'));
+const act = (intent, extra = {}) => { navigator.vibrate?.(30); return post('/api/action', {intent, ...extra}); };
+
+function note(text, cls = '') {
+  const li = document.createElement('li'); li.className = cls; li.textContent = text; feed.append(li);
+  feed.scrollTop = feed.scrollHeight;
+}
+function addEvent(e) {
+  const d = e.data || {}; const li = document.createElement('li');
+  const who = (name, text) => { li.innerHTML = '<span class="who"></span> <span></span>';
+    li.children[0].textContent = name + ':'; li.children[1].textContent = text; };
+  if (e.kind === 'speak') { who('Teddy', d.reply); speakOut(d.reply); }
+  else if (e.kind === 'heard') { li.className = 'you'; who('You', d.text); }
+  else if (e.kind === 'alert') { li.className = 'alert'; li.textContent = '⚠ Alert: ' + (d.status || '').replace(/_/g, ' ') + (d.text ? ' — ' + d.text : ''); }
+  else if (e.kind === 'gesture') { li.className = 'meta'; li.textContent = { wave: '👋 You waved', point: '👉 You pointed', come_here: '🫴 Come here', thumbs_up: '👍 Thumbs up' }[d.type] || d.type; }
+  else return;
+  feed.append(li);
+  while (feed.children.length > 60) feed.firstChild.remove();
+  feed.scrollTop = feed.scrollHeight;
+}
+function speakOut(text) {
+  if (!$('#readAloud').checked || !window.speechSynthesis || !text) return;
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+const NICE = { idle: 'Ready', find_object: 'Looking…', read: 'Reading…', identify: 'Looking…', dance: 'Dancing!',
+  cpr_coach: 'CPR coaching', fall_check: 'Checking on you', mood_checkin: 'Listening', chat: 'Thinking…',
+  homework: 'Thinking…', first_aid: 'First aid' };
+async function poll() {
+  try {
+    const r = await fetch('/api/feed?after=' + after); const j = await r.json();
+    j.events.forEach(e => { after = Math.max(after, e.id); addEvent(e); });
+    if (j.status !== lastStatus) {
+      lastStatus = j.status;
+      document.body.classList.toggle('busy', j.status !== 'idle');
+      $('#stateText').textContent = NICE[j.status] || (j.status.startsWith('gesture') ? 'Saying hi' : j.status);
+    }
+  } catch { $('#stateText').textContent = 'Offline'; }
+  setTimeout(poll, 1200);
+}
+
+document.querySelectorAll('[data-intent]').forEach(b => b.addEventListener('click', () => act(b.dataset.intent)));
+$('#stop').addEventListener('click', () => act('stop'));
+const dlg = $('#findDlg');
+$('#findBtn').addEventListener('click', () => dlg.showModal());
+$('#findClose').addEventListener('click', () => dlg.close());
+document.querySelectorAll('[data-find]').forEach(b => b.addEventListener('click', () => { act('find_object', {object: b.dataset.find}); dlg.close(); }));
+$('#findOther').addEventListener('submit', e => { e.preventDefault(); const v = $('#findText').value.trim();
+  if (v) { act('find_object', {object: v}); $('#findText').value = ''; dlg.close(); } });
+$('#talk').addEventListener('submit', e => { e.preventDefault(); const v = $('#talkText').value.trim();
+  if (v) { post('/api/say', {text: v}); $('#talkText').value = ''; } });
+try { if (localStorage.getItem('readAloud') === '1') $('#readAloud').checked = true; } catch {}
+$('#readAloud').addEventListener('change', e => { try { localStorage.setItem('readAloud', e.target.checked ? '1' : '0'); } catch {} });
+
+// Voice input from the phone, where the browser supports it
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SR) {
+  const mic = $('#mic'); mic.hidden = false;
+  mic.addEventListener('click', () => {
+    const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false;
+    mic.setAttribute('aria-label', 'Listening… speak now');
+    rec.onresult = ev => { const t = ev.results[0][0].transcript; post('/api/say', {text: t}); };
+    rec.onend = () => mic.setAttribute('aria-label', 'Speak to Teddy with your voice');
+    rec.start();
+  });
+}
+poll();
+</script>
+</body>
+</html>

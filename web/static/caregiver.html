@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teddy Caregiver</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3ef; --surface-1: #fcfcfb; --line: #e2e0da;
+    --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #6d6c67;
+    --series-1: #2a78d6; --accent: #29b5e8;
+    --critical: #c62828; --critical-bg: #fdecea; --warning: #9a6700; --warning-bg: #fff4d6; --good: #1a7f37;
+    --radius: 16px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110; --surface-1: #1a1a19; --line: #33332f;
+      --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #9d9c93;
+      --series-1: #3987e5; --critical: #ff8a80; --critical-bg: #3a1614; --warning: #f2c14e; --warning-bg: #332812; --good: #56d364;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--surface-0); color: var(--text-primary);
+         font: 16px/1.45 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
+  h1 { font-size: 26px; margin: 0; }
+  h1 small { display: block; font-size: 15px; font-weight: 500; color: var(--text-secondary); }
+  .badge { font-size: 13px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-1); color: var(--text-secondary); }
+  .badge b { color: var(--accent); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; color: var(--text-secondary); font-weight: 600; }
+  .s12 { grid-column: span 12; } .s8 { grid-column: span 8; } .s6 { grid-column: span 6; } .s4 { grid-column: span 4; } .s3 { grid-column: span 3; }
+  @media (max-width: 820px) { .s8, .s6, .s4 { grid-column: span 12; } .s3 { grid-column: span 6; } }
+  .tile .num { font-size: 34px; font-weight: 700; line-height: 1.1; }
+  .tile .sub { color: var(--text-muted); font-size: 14px; }
+  .chart { position: relative; height: 220px; }
+
+  form.ask { display: flex; gap: 8px; }
+  form.ask input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 14px; border-radius: 12px;
+                   border: 2px solid var(--line); background: var(--surface-0); color: var(--text-primary); }
+  form.ask button, .chip { font: inherit; border-radius: 12px; border: 0; cursor: pointer; }
+  form.ask button { background: var(--series-1); color: #fff; padding: 0 18px; font-weight: 600; font-size: 17px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+  .chip { background: var(--surface-0); border: 1px solid var(--line); color: var(--text-primary); padding: 8px 12px; font-size: 14px; }
+  #answer { font-size: 19px; margin: 14px 0 0; min-height: 1.4em; }
+  details { margin-top: 8px; color: var(--text-secondary); font-size: 13px; }
+  pre { white-space: pre-wrap; background: var(--surface-0); padding: 10px; border-radius: 10px; overflow-x: auto; }
+  :focus-visible { outline: 3px solid var(--series-1); outline-offset: 2px; }
+
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  ul.list li:last-child { border-bottom: 0; }
+  .muted { color: var(--text-muted); }
+  .alert { border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; display: block !important; }
+  .alert.critical { background: var(--critical-bg); color: var(--text-primary); border-left: 4px solid var(--critical); }
+  .alert.warning { background: var(--warning-bg); color: var(--text-primary); border-left: 4px solid var(--warning); }
+  .alert .when { color: var(--text-secondary); font-size: 13px; }
+  #live li { font-size: 14px; }
+  table.sr-table { position: absolute; left: -9999px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span aria-hidden="true">🧸</span> <span id="owner">Teddy</span>'s week <small>Caregiver dashboard</small></h1>
+    <span class="badge" id="engine">Brain: <b>…</b></span>
+  </header>
+
+  <div class="grid">
+    <section class="card s12" aria-labelledby="askTitle">
+      <h2 id="askTitle">Ask Teddy's memory</h2>
+      <form class="ask" id="ask">
+        <label for="q" class="muted" style="position:absolute;left:-9999px">Your question</label>
+        <input id="q" type="text" placeholder="Where did I leave my keys?" autocomplete="off">
+        <button type="submit">Ask</button>
+      </form>
+      <div class="chips" role="group" aria-label="Example questions">
+        <button class="chip" type="button">Where did I leave my keys?</button>
+        <button class="chip" type="button">How was grandma this week?</button>
+        <button class="chip" type="button">Did she fall or need help?</button>
+        <button class="chip" type="button">What has she been asking Teddy for?</button>
+        <button class="chip" type="button">When was she saddest?</button>
+      </div>
+      <p id="answer" aria-live="polite"></p>
+      <details id="how" hidden><summary>How Teddy found this</summary><div id="howBody"></div></details>
+    </section>
+
+    <section class="card tile s3"><h2>Mood today</h2><div class="num" id="moodNow">–</div><div class="sub" id="moodNowSub"></div></section>
+    <section class="card tile s3"><h2>Week average mood</h2><div class="num" id="moodAvg">–</div><div class="sub">out of 5</div></section>
+    <section class="card tile s3"><h2>Talks with Teddy</h2><div class="num" id="talks">–</div><div class="sub">this week</div></section>
+    <section class="card tile s3"><h2>Alerts</h2><div class="num" id="alertCount">–</div><div class="sub">this week</div></section>
+
+    <section class="card s8"><h2 id="moodTitle">Mood by day (1 = very low, 5 = great)</h2>
+      <div class="chart"><canvas id="moodChart" role="img" aria-labelledby="moodTitle"></canvas></div>
+      <table class="sr-table" id="moodTable"></table></section>
+    <section class="card s4"><h2>Alerts</h2><ul class="list" id="alerts"><li class="muted">None</li></ul></section>
+
+    <section class="card s6"><h2 id="talkTitle">Conversations per day</h2>
+      <div class="chart"><canvas id="talkChart" role="img" aria-labelledby="talkTitle"></canvas></div></section>
+    <section class="card s6"><h2 id="hourTitle">When she's active (by hour)</h2>
+      <div class="chart"><canvas id="hourChart" role="img" aria-labelledby="hourTitle"></canvas></div></section>
+
+    <section class="card s4"><h2>Last seen</h2><ul class="list" id="seen"></ul></section>
+    <section class="card s4"><h2>What she asks Teddy for</h2><ul class="list" id="intents"></ul></section>
+    <section class="card s4"><h2>Live</h2><ul class="list" id="live" aria-live="polite"><li class="muted">Waiting for Teddy…</li></ul></section>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const LABELS = { find_object: 'Find things', identify: "What's this?", read: 'Read to me', homework: 'Homework', cpr_coach: 'CPR',
+  first_aid: 'First aid', fall_check: 'Check on me', chat: 'Chatting', dance: 'Dancing', mood_checkin: 'Mood check-in', stop: 'Stop' };
+const ALERTS = { fallen: ['critical', '⚠', 'Fall detected'], no_response: ['warning', '●', 'No answer to check-in'],
+  help_requested: ['critical', '⚠', 'Asked for help'], low_mood: ['warning', '●', 'Low mood'], cpr_started: ['critical', '⚠', 'CPR coach started'] };
+const fmtTime = ts => new Date(ts.replace(' ', 'T')).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+let charts = {};
+
+function barOrLine(id, type, labels, data, opts = {}) {
+  const color = css('--series-1'), grid = css('--line'), ink = css('--text-secondary');
+  charts[id]?.destroy();
+  charts[id] = new Chart($(id), {
+    type, data: { labels, datasets: [{ data, borderColor: color, backgroundColor: color, borderWidth: 2,
+      pointRadius: 5, pointHoverRadius: 7, pointBorderColor: css('--surface-1'), pointBorderWidth: 2,
+      borderRadius: 4, maxBarThickness: 28, spanGaps: true, cubicInterpolationMode: 'monotone' }] },
+    options: { maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+      scales: { x: { grid: { display: false }, ticks: { color: ink } },
+                y: { grid: { color: grid }, border: { display: false }, ticks: { color: ink, precision: 0 }, ...opts.y } } }
+  });
+}
+
+async function load() {
+  const s = await (await fetch('/api/stats')).json();
+  $('#owner').textContent = s.owner;
+  $('#engine').innerHTML = 'Brain: <b>' + (s.engine === 'snowflake' ? 'Snowflake Cortex' : 'local mock') + '</b>';
+  const moods = s.mood.filter(v => v != null);
+  const lm = s.last_mood;
+  $('#moodNow').textContent = lm && lm.score ? lm.score + ' / 5' : '–';
+  $('#moodNowSub').textContent = lm ? (lm.mood || '') + (lm.text ? ' — “' + lm.text + '”' : '') : '';
+  $('#moodAvg').textContent = moods.length ? (moods.reduce((a, b) => a + b, 0) / moods.length).toFixed(1) : '–';
+  $('#talks').textContent = s.interactions.reduce((a, b) => a + b, 0);
+  $('#alertCount').textContent = s.alerts.length;
+
+  barOrLine('#moodChart', 'line', s.days, s.mood, { y: { min: 1, max: 5 } });
+  $('#moodTable').innerHTML = '<caption>Mood by day</caption>' + s.days.map((d, i) => `<tr><th>${d}</th><td>${s.mood[i] ?? 'no check-in'}</td></tr>`).join('');
+  barOrLine('#talkChart', 'bar', s.days, s.interactions);
+  const hrs = s.hours.slice(6, 24), hl = [...Array(18)].map((_, i) => { const h = i + 6; return (h % 12 || 12) + (h < 12 ? 'a' : 'p'); });
+  barOrLine('#hourChart', 'bar', hl, hrs);
+
+  $('#alerts').innerHTML = s.alerts.length ? '' : '<li class="muted">No alerts this week</li>';
+  s.alerts.forEach(a => {
+    const [lvl, icon, label] = ALERTS[a.status] || ['warning', '●', a.status];
+    const li = document.createElement('li'); li.className = 'alert ' + lvl;
+    li.innerHTML = `<div><span aria-hidden="true">${icon}</span> <b></b></div><div class="when"></div><div></div>`;
+    li.querySelector('b').textContent = label; li.querySelector('.when').textContent = fmtTime(a.ts);
+    li.lastChild.textContent = a.text || ''; $('#alerts').append(li);
+  });
+  $('#seen').innerHTML = '';
+  s.last_seen.forEach(o => { const li = document.createElement('li'); li.innerHTML = '<span></span><span class="muted"></span>';
+    li.children[0].textContent = o.label; li.children[1].textContent = o.when; $('#seen').append(li); });
+  $('#intents').innerHTML = '';
+  Object.entries(s.intents).slice(0, 7).forEach(([k, n]) => { const li = document.createElement('li');
+    li.innerHTML = '<span></span><b></b>'; li.children[0].textContent = LABELS[k] || k; li.children[1].textContent = n; $('#intents').append(li); });
+}
+
+async function ask(q) {
+  $('#q').value = q; $('#answer').textContent = 'Thinking…'; $('#how').hidden = true;
+  try {
+    const r = await (await fetch('/api/caregiver/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q }) })).json();
+    $('#answer').textContent = r.answer;
+    $('#howBody').innerHTML = '<p></p><pre></pre>';
+    $('#howBody p').textContent = `Engine: ${r.engine} · ${r.rows.length} rows · ${(r.ms / 1000).toFixed(1)}s` + (r.error ? ' · SQL error: ' + r.error : '');
+    $('#howBody pre').textContent = r.sql || '(no SQL)';
+    $('#how').hidden = false;
+  } catch { $('#answer').textContent = "Couldn't reach Teddy right now."; }
+}
+$('#ask').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim(); if (q) ask(q); });
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => ask(c.textContent)));
+
+let after = 0;
+async function live() {
+  try {
+    const j = await (await fetch('/api/feed?after=' + after)).json();
+    const box = $('#live');
+    j.events.forEach(e => {
+      after = Math.max(after, e.id);
+      const d = e.data || {}; let t = null;
+      if (e.kind === 'speak') t = '🧸 ' + d.reply;
+      else if (e.kind === 'heard') t = '🗣 ' + d.text;
+      else if (e.kind === 'alert') t = '⚠ ' + (ALERTS[d.status]?.[2] || d.status);
+      else if (e.kind === 'intent') t = '▶ ' + (LABELS[d.intent] || d.intent) + ' (' + d.source + ')';
+      if (!t) return;
+      if (box.firstElementChild?.classList.contains('muted')) box.innerHTML = '';
+      const li = document.createElement('li'); li.textContent = t; box.prepend(li);
+      while (box.children.length > 8) box.lastChild.remove();
+      if (e.kind === 'alert' || e.kind === 'mood') load();
+    });
+  } catch {}
+  setTimeout(live, 2000);
+}
+load(); live();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', load);
+</script>
+</body>
+</html>
