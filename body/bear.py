@@ -52,8 +52,8 @@ HOME["arm_r"] = 20
 LIMITS = {
     "head_pan": (20, 160),
     "head_tilt": (20, 160),
-    "arm_l": (90, 175),     # 90 = fouls the legs; 160 = home
-    "arm_r": (5, 90),       # mirrored: 90 = fouls the legs; 20 = home
+    "arm_l": (90, 180),     # 90 = hard wall (fouls the legs); 160 = home
+    "arm_r": (0, 90),       # mirrored: 90 = hard wall; 20 = home
     "leg_l_side": (20, 160),
     "leg_l_kick": (20, 160),
     "leg_r_side": (20, 160),
@@ -91,7 +91,15 @@ LOOK_PAN = (55, -55)    # offset from neutral at x=0 (his left) and x=1
 LOOK_TILT = (35, -35)   # offset from neutral at y=0 (top, look up) and y=1
 
 MAX_SIMULTANEOUS = 3    # servos allowed to start moving on the same instant
-STAGGER = 0.06          # seconds between one batch of 3 and the next
+STAGGER = 0.05          # seconds between one batch of 3 and the next
+
+# He is inside a stuffed bear now, and the fabric fights every move, so we
+# drive close to the servo's top speed and let the SERVO be the thing that
+# lags -- not our easing curve. An SG90 is ~0.1s per 60 degrees unloaded
+# (600 deg/s); we aim a little under that so the commanded motion is still
+# something the horn can actually follow.
+MAX_DEG_PER_SEC = 520
+MIN_DURATION = 0.07     # floor, so tiny moves still get a real ramp
 TICK = 0.02             # motion update period (50 Hz)
 MIN_STEP = 1            # don't bother sending sub-degree changes
 
@@ -222,6 +230,54 @@ class Body:
                 return not self._cancel.is_set()
             if self._cancel.wait(min(left, TICK)):
                 return False
+
+    def reach(self, joint, fraction=1.0):
+        """Angle `fraction` of the way from HOME to the far end of this joint's
+        travel. fraction=+1 goes all the way in the joint's + direction, -1 all
+        the way the other way, and both are mirrored, so reach('arm_l', 1) and
+        reach('arm_r', 1) are the same swing on opposite sides.
+
+        This is how gestures get their size: ask for a fraction of what the
+        joint actually has, rather than guessing a degree offset that might be
+        timid on one joint and slam into a limit on another.
+        """
+        joint = self._resolve(joint)
+        home = HOME[joint]
+        lo, hi = LIMITS[joint]
+        plus_end = hi if DIRECTION[joint] > 0 else lo
+        minus_end = lo if DIRECTION[joint] > 0 else hi
+        end = plus_end if fraction >= 0 else minus_end
+        return home + (end - home) * abs(fraction)
+
+    def travel_time(self, targets, scale=1.0):
+        """How long the biggest move in `targets` needs at near-top speed."""
+        worst = 0
+        for joint, raw in targets.items():
+            joint = self._resolve(joint)
+            now = self.angles.get(joint)
+            if now is None:
+                continue
+            worst = max(worst, abs(self._safe(joint, raw) - now))
+        return max(MIN_DURATION, worst / MAX_DEG_PER_SEC) * scale
+
+    def _snap(self, targets, scale=1.0):
+        """Move as fast as the servos can reasonably go."""
+        return self._transition(targets, self.travel_time(targets, scale))
+
+    def _overshoot(self, targets, past=15, settle=0.07, scale=1.0):
+        """Drive past the target, then fall back into it. The little bounce is
+        what makes a gesture read from across a room. Limits still apply, so
+        this can never push an arm through the 90-degree wall."""
+        over = {}
+        for joint, raw in targets.items():
+            joint = self._resolve(joint)
+            end = self._safe(joint, raw)
+            now = self.angles.get(joint)
+            over[joint] = end if now is None or end == now else \
+                self._safe(joint, end + (past if end > now else -past))
+        if not self._snap(over, scale):
+            return False
+        return self._transition(targets, settle)
 
     def _transition(self, targets, duration=0.5):
         """Ease every joint in `targets` (name -> raw angle) to its target.
@@ -461,147 +517,178 @@ class Body:
     def _both_arms(self, offset):
         return {"arm_l": self.sym("arm_l", offset), "arm_r": self.sym("arm_r", offset)}
 
+    def _both_arms_reach(self, fraction):
+        return {"arm_l": self.reach("arm_l", fraction),
+                "arm_r": self.reach("arm_r", fraction)}
+
     def _dance(self, seconds=10):
-        # Four waves, each a share of the total. Arms -> legs -> head -> finale.
-        arms, legs, head, finale = (0.32 * seconds, 0.28 * seconds,
-                                    0.25 * seconds, 0.15 * seconds)
+        """Arms, then legs, then head, then all of him -- at full travel.
 
-        # 1. arms: alternating raise, like he's doing the wave
-        beat = arms / 6.0
-        for _ in range(3):
-            if not self._transition({"arm_l": self.sym("arm_l", 60),
-                                     "arm_r": self.sym("arm_r", -10)}, beat):
-                return
-            if not self._transition({"arm_l": self.sym("arm_l", -10),
-                                     "arm_r": self.sym("arm_r", 60)}, beat):
-                return
+        Each phase runs to a deadline rather than a fixed number of beats,
+        because the moves are now fast enough that a counted loop would finish
+        early and leave him standing there. Sizes come from reach(), so every
+        joint swings as far as it safely can; inside the stuffing anything
+        smaller just disappears.
+        """
+        t0 = time.monotonic()
+        arms_until = t0 + 0.30 * seconds
+        legs_until = t0 + 0.58 * seconds
+        head_until = t0 + 0.82 * seconds
+        end = t0 + seconds
 
-        # 2. legs: side-to-side shuffle with a kick on each side (4 servos ->
-        #    the engine staggers them into batches of 3 on its own)
-        beat = legs / 4.0
-        for side in ("l", "r", "l", "r"):
+        # 1. arms: full-range alternating flap, as fast as they will go
+        i = 0
+        while time.monotonic() < arms_until:
+            a, bb = (-1.0, 0.8) if i % 2 == 0 else (0.8, -1.0)
+            if not self._snap({"arm_l": self.reach("arm_l", a),
+                               "arm_r": self.reach("arm_r", bb),
+                               "head_tilt": self.reach("head_tilt",
+                                                       0.8 if i % 2 == 0 else 0.0)}):
+                return
+            i += 1
+
+        # 2. legs: kicks swinging the WHOLE way through, not just out from home
+        #    (4 servos -> the engine batches them 3 at a time, and they relax
+        #    on their own once each move lands)
+        i = 0
+        while time.monotonic() < legs_until:
+            side = "l" if i % 2 == 0 else "r"
             other = "r" if side == "l" else "l"
-            ok = self._transition({
-                "leg_%s_side" % side: self.sym("leg_%s_side" % side, 45),
-                "leg_%s_kick" % side: self.sym("leg_%s_kick" % side, 40),
-                "leg_%s_side" % other: self.sym("leg_%s_side" % other, 0),
-                "leg_%s_kick" % other: self.sym("leg_%s_kick" % other, 0),
-            }, beat)
+            ok = self._snap({
+                "leg_%s_side" % side: self.reach("leg_%s_side" % side, 1.0),
+                "leg_%s_kick" % side: self.reach("leg_%s_kick" % side, 1.0),
+                "leg_%s_side" % other: self.reach("leg_%s_side" % other, -1.0),
+                "leg_%s_kick" % other: self.reach("leg_%s_kick" % other, -1.0),
+            })
             if not ok:
                 return
+            i += 1
 
-        # 3. head: look around, bob along
-        beat = head / 4.0
-        for pan, tilt in ((45, 15), (-45, -10), (45, 15), (0, 0)):
-            if not self._transition({"head_pan": self.sym("head_pan", pan),
-                                     "head_tilt": self.sym("head_tilt", tilt)}, beat):
+        # 3. head: full bop, corner to corner
+        i = 0
+        while time.monotonic() < head_until:
+            f = 1.0 if i % 2 == 0 else -1.0
+            if not self._snap({"head_pan": self.reach("head_pan", f),
+                               "head_tilt": self.reach("head_tilt", f)}):
                 return
+            i += 1
 
-        # 4. finale: arms up, head up, hold, then home
-        if not self._transition(dict(self._both_arms(70),
-                                     head_tilt=self.sym("head_tilt", 25)),
-                                finale * 0.45):
+        # 4. finale: everything up, bounce, hold, home
+        if not self._overshoot(dict(self._both_arms_reach(-1.0),
+                                    head_tilt=self.reach("head_tilt", 1.0)), past=18):
             return
-        if not self._sleep(finale * 0.25):
+        if not self._sleep(max(0.0, end - time.monotonic() - 0.4)):
             return
-        self._neutral(finale * 0.3)
+        self._snap(dict(HOME), scale=1.6)
 
     def _cpr(self, bpm=110, seconds=30):
         period = 60.0 / max(40.0, min(160.0, float(bpm)))
         down, up = period * 0.4, period * 0.6
         beats = max(1, int(seconds / period))
         # Ready position: arms out front, head slightly down, looking at "them".
-        if not self._transition(dict(self._both_arms(35),
-                                     head_tilt=self.sym("head_tilt", -10)), 0.5):
+        if not self._snap(dict(self._both_arms_reach(0.45),
+                               head_tilt=self.reach("head_tilt", -0.2))):
             return
         for i in range(beats):
             # press: arms down + head nods down (3 servos exactly)
-            if not self._transition(dict(self._both_arms(10),
-                                         head_tilt=self.sym("head_tilt", -25)), down):
+            # deeper press than before so it reads through the stuffing;
+            # the tempo is what matters, so these keep their exact durations
+            if not self._transition(dict(self._both_arms_reach(0.9),
+                                         head_tilt=self.reach("head_tilt", -0.6)), down):
                 return
-            if not self._transition(dict(self._both_arms(35),
-                                         head_tilt=self.sym("head_tilt", -5)), up):
+            if not self._transition(dict(self._both_arms_reach(0.35),
+                                         head_tilt=self.reach("head_tilt", -0.05)), up):
                 return
-        self._neutral(0.6)
+        self._snap(dict(HOME), scale=1.6)
 
     def _neutral(self, duration=0.6):
         return self._transition(dict(HOME), duration)
 
 
 # -------------------------------------------------------------- gestures ----
-# Each takes the Body. They run on the worker thread and should bail out as soon
-# as a _transition/_sleep returns False (that means stop() was called).
+# Each takes the Body. They run on the worker thread and bail out as soon as a
+# _snap/_transition/_sleep returns False (that means stop() was called).
+#
+# Sizes are fractions of each joint's real travel via b.reach(), so a gesture
+# is as big as the joint allows instead of a guessed number of degrees. He is
+# inside a stuffed bear -- timid moves vanish into the stuffing.
 
 def _g_neutral(b):
-    b._neutral(0.6)
+    b._snap(dict(HOME), scale=1.6)
 
 
 def _g_wave(b):
-    b._transition({"arm_r": b.sym("arm_r", 65),
-                   "head_tilt": b.sym("head_tilt", 12)}, 0.45)
-    for _ in range(3):
-        if not b._transition({"arm_r": b.sym("arm_r", 40),
-                              "head_pan": b.sym("head_pan", -12)}, 0.22):
+    # Arm all the way up and away from the legs, then big fast flaps.
+    b._snap({"arm_r": b.reach("arm_r", -1.0),
+             "head_tilt": b.reach("head_tilt", 0.5)})
+    for _ in range(4):
+        if not b._snap({"arm_r": b.reach("arm_r", 0.35),
+                        "head_pan": b.reach("head_pan", -0.35)}):
             return
-        if not b._transition({"arm_r": b.sym("arm_r", 68),
-                              "head_pan": b.sym("head_pan", 12)}, 0.22):
+        if not b._snap({"arm_r": b.reach("arm_r", -1.0),
+                        "head_pan": b.reach("head_pan", 0.35)}):
             return
-    b._transition({"arm_r": HOME["arm_r"], "head_pan": HOME["head_pan"],
-                   "head_tilt": HOME["head_tilt"]}, 0.5)
+    b._overshoot({"arm_r": HOME["arm_r"], "head_pan": HOME["head_pan"],
+                  "head_tilt": HOME["head_tilt"]}, past=12)
 
 
 def _g_think(b):
-    # Head cocked, one paw up by the chin, then a slow "hmm" sway.
-    b._transition({"head_tilt": b.sym("head_tilt", 18),
-                   "head_pan": b.sym("head_pan", 28),
-                   "arm_r": b.sym("arm_r", 55)}, 0.7)
+    # Head cocked hard over, one paw up, then a slow deliberate sway.
+    b._snap({"head_tilt": b.reach("head_tilt", 0.55),
+             "head_pan": b.reach("head_pan", 0.85),
+             "arm_r": b.reach("arm_r", -0.75)})
     for _ in range(2):
-        if not b._transition({"head_pan": b.sym("head_pan", 14)}, 0.9):
+        if not b._snap({"head_pan": b.reach("head_pan", 0.35)}, scale=3.5):
             return
-        if not b._transition({"head_pan": b.sym("head_pan", 32)}, 0.9):
+        if not b._snap({"head_pan": b.reach("head_pan", 0.95)}, scale=3.5):
             return
 
 
 def _g_happy(b):
-    b._transition(dict(b._both_arms(65), head_tilt=b.sym("head_tilt", 25)), 0.35)
-    for _ in range(2):
-        if not b._transition(dict(b._both_arms(40),
-                                  head_pan=b.sym("head_pan", -18)), 0.2):
+    # Both arms flung up, then full-range flapping with a bounce at the end.
+    b._snap(dict(b._both_arms_reach(-1.0),
+                 head_tilt=b.reach("head_tilt", 0.8)))
+    for _ in range(3):
+        if not b._snap(dict(b._both_arms_reach(0.5),
+                            head_pan=b.reach("head_pan", -0.5))):
             return
-        if not b._transition(dict(b._both_arms(68),
-                                  head_pan=b.sym("head_pan", 18)), 0.2):
+        if not b._snap(dict(b._both_arms_reach(-1.0),
+                            head_pan=b.reach("head_pan", 0.5))):
             return
-    b._transition(dict(b._both_arms(0), head_pan=HOME["head_pan"],
-                       head_tilt=b.sym("head_tilt", 8)), 0.5)
+    b._overshoot(dict(b._both_arms_reach(-0.2),
+                      head_pan=HOME["head_pan"],
+                      head_tilt=b.reach("head_tilt", 0.35)), past=18)
 
 
 def _g_sad(b):
-    # Everything slow and heavy: head down, arms hanging.
-    b._transition(dict(b._both_arms(-40), head_tilt=b.sym("head_tilt", -35)), 1.4)
-    if not b._sleep(0.6):
+    # Head all the way down, arms dropped toward the legs. Quick to get there,
+    # then it just hangs -- the stillness is the expression.
+    b._snap({"head_tilt": b.reach("head_tilt", -1.0)}, scale=2.2)
+    b._snap(b._both_arms_reach(0.85), scale=2.2)
+    if not b._sleep(0.5):
         return
-    b._transition({"head_pan": b.sym("head_pan", -16)}, 1.2)
+    b._snap({"head_pan": b.reach("head_pan", -0.55)}, scale=2.6)
 
 
 def _g_alert(b):
-    # Snap upright, then a quick scan left/right.
-    b._transition({"head_tilt": b.sym("head_tilt", 30),
-                   "head_pan": HOME["head_pan"],
-                   "arm_l": b.sym("arm_l", 25)}, 0.25)
-    b._transition({"arm_r": b.sym("arm_r", 25)}, 0.2)
-    for pan in (35, -35, 0):
-        if not b._transition({"head_pan": b.sym("head_pan", pan)}, 0.3):
+    # Snap bolt upright, arms out, then a hard scan across the full sweep.
+    b._overshoot({"head_tilt": b.reach("head_tilt", 1.0),
+                  "head_pan": HOME["head_pan"],
+                  "arm_l": b.reach("arm_l", -0.55)}, past=14)
+    b._snap({"arm_r": b.reach("arm_r", -0.55)})
+    for f in (1.0, -1.0, 0.0):
+        if not b._snap({"head_pan": b.reach("head_pan", f)}):
             return
 
 
 def _g_listen(b):
-    # The "I'm paying attention" tilt: ear toward you, chin slightly up, still.
-    b._transition({"head_tilt": b.sym("head_tilt", 14),
-                   "head_pan": b.sym("head_pan", 22),
-                   "arm_l": b.sym("arm_l", -18),
-                   "arm_r": b.sym("arm_r", -18)}, 0.6)
-    # A tiny settle so he looks alive rather than frozen.
-    b._transition({"head_pan": b.sym("head_pan", 26)}, 1.1)
+    # Ear cocked right over toward you, paws down, then hold still and just
+    # breathe. Being still is the point -- but get there fast.
+    b._snap({"head_tilt": b.reach("head_tilt", 0.45),
+             "head_pan": b.reach("head_pan", 0.7),
+             "arm_l": b.reach("arm_l", 0.25),
+             "arm_r": b.reach("arm_r", 0.25)})
+    b._snap({"head_pan": b.reach("head_pan", 0.85)}, scale=4.0)
 
 
 _GESTURES = {
