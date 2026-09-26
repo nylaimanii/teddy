@@ -1,0 +1,6 @@
+snowflake-connector-python
+fastapi
+uvicorn[standard]
+python-dotenv
+qrcode[pil]
+requests

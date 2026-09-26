@@ -1,0 +1,91 @@
+name: teddy_caregiver
+description: >
+  Activity log of Teddy, an AI teddy bear that lives with a person who is often alone
+  (a senior or a child). Caregivers ask how their loved one is doing and where things were left.
+tables:
+  - name: events
+    description: One row per thing the bear did, heard, or noticed.
+    base_table:
+      database: TEDDY
+      schema: CORE
+      table: EVENTS_FLAT
+    time_dimensions:
+      - name: ts
+        expr: TS
+        data_type: TIMESTAMP_NTZ
+        description: When it happened (local time).
+      - name: day
+        expr: DAY
+        data_type: DATE
+    dimensions:
+      - name: kind
+        expr: KIND
+        data_type: VARCHAR
+        description: >
+          Event type. intent = a request the person made; gesture = wave/point/come_here;
+          mood = a mood check-in; fall_check = the bear checked for a fall; alert = something
+          a caregiver should know (fall, no response, asked for help); speak = what the bear said;
+          heard = what the person said; vitals = heart/breathing rate reading.
+        sample_values: [intent, gesture, mood, fall_check, alert, speak, heard, vitals]
+      - name: intent
+        expr: INTENT
+        data_type: VARCHAR
+        sample_values: [find_object, identify, read, homework, cpr_coach, first_aid, fall_check, chat, dance, mood_checkin]
+      - name: object
+        expr: OBJECT
+        data_type: VARCHAR
+        description: Object the person asked the bear to find.
+      - name: mood
+        expr: MOOD
+        data_type: VARCHAR
+        sample_values: [happy, okay, tired, sad, lonely, in pain]
+      - name: status
+        expr: STATUS
+        data_type: VARCHAR
+        sample_values: [ok, fallen, no_response, help_requested]
+      - name: source
+        expr: SOURCE
+        data_type: VARCHAR
+        sample_values: [voice, gesture, phone]
+      - name: text
+        expr: TEXT
+        data_type: VARCHAR
+        description: What the person said.
+    measures:
+      - name: mood_score
+        expr: MOOD_SCORE
+        data_type: NUMBER
+        default_aggregation: avg
+        description: Self-reported mood from 1 (very bad) to 5 (great).
+      - name: heart_rate
+        expr: HEART_RATE
+        data_type: NUMBER
+        default_aggregation: avg
+      - name: event_count
+        expr: 1
+        data_type: NUMBER
+        default_aggregation: sum
+  - name: sightings
+    description: Objects the bear's camera saw and where in the room (x,y from 0 to 1).
+    base_table:
+      database: TEDDY
+      schema: CORE
+      table: SIGHTINGS
+    time_dimensions:
+      - name: ts
+        expr: TS
+        data_type: TIMESTAMP_NTZ
+    dimensions:
+      - name: label
+        expr: LABEL
+        data_type: VARCHAR
+        sample_values: [keys, glasses, phone, remote, pill bottle, wallet, cup]
+    measures:
+      - name: x
+        expr: X
+        data_type: NUMBER
+        default_aggregation: avg
+      - name: y
+        expr: Y
+        data_type: NUMBER
+        default_aggregation: avg
