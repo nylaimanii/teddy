@@ -46,7 +46,8 @@ Notes for whoever's wiring this up:
   stray 3.14 install inside the same venv and writes where `.venv/bin/python`
   can't see it.
 - The Uno enumerates as `/dev/cu.usbmodem1301`; `Body()` finds it on its own.
-- Flash the Uno with `firmware/upload.sh` (compiles + uploads).
+- Flash the Uno with `firmware/upload.sh` (compiles + uploads, with retries),
+  or open `firmware/Bear/` in the Arduino IDE — the folder matches the .ino.
 - **The Uno reboots whenever the serial port opens or closes**, which snaps
   every servo to 90. So `echo "0 40" > /dev/cu.usbmodem1301` never works: the
   board is still in its bootloader when the bytes land, and the shell closes
@@ -64,6 +65,9 @@ a 500 mA polyfuse. One SG90 draws ~250–400 mA while moving and stalls near
 and the symptoms look like software bugs:
 
 - serial goes silent, `ping()` returns nothing
+- an orphaned `avrdude` keeps the port busy after a failed upload, so the
+  next attempt fails for a different reason than the first (`upload.sh`
+  clears these now; `lsof /dev/cu.usbmodem*` shows who holds the port)
 - `arduino-cli upload` fails with `not in sync: resp=0x00`
 - the USB port vanishes mid-upload and re-enumerates seconds later
 
