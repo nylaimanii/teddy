@@ -20,7 +20,7 @@ from brain.mocks import MockBody, MockVision, MockVoice
 
 INTENTS = ["find_object", "identify", "read", "homework", "cpr_coach", "first_aid",
            "fall_check", "chat", "dance", "mood_checkin", "stop"]
-PORT = os.getenv("TEDDY_PORT", "/dev/cu.usbmodem11301")
+PORT = os.getenv("TEDDY_PORT")  # None -> Body auto-detects the Uno
 
 PERSONA = (
     f"You are Teddy, a warm, gentle teddy bear who keeps {sf.OWNER} company. You speak out loud, so reply "
@@ -169,6 +169,15 @@ class Teddy:
             sf.log_event("heard", {"text": text, "source": "voice"})
         return text
 
+    def _body_wait(self, seconds):
+        """Real Body queues motions and returns at once; wait for them, but let 'stop' cut in."""
+        if not hasattr(self.body, "wait"):
+            return
+        end = time.time() + seconds + 3
+        while time.time() < end and not self._stop.is_set():
+            if self._safe(self.body.wait, 0.25):
+                return
+
     def _safe(self, fn, *a, **kw):
         try:
             return fn(*a, **kw)
@@ -308,6 +317,7 @@ class Teddy:
             if self._stop.is_set():
                 break
             self._safe(self.body.cpr_beat, 110, 30)
+            self._body_wait(30)
             if self._stop.is_set():
                 break
             self.say(random.choice(["You're doing great. Keep pushing, hard and fast.",
@@ -362,6 +372,7 @@ class Teddy:
     def do_dance(self, **_):
         self.say("Dance party! Let's go!", mood="happy", pose="happy")
         self._safe(self.body.dance, 10)
+        self._body_wait(10)
         self._safe(self.body.pose, "neutral")
         return self.say("Whew! That was fun!", mood="happy")
 

@@ -4,3 +4,4 @@ uvicorn[standard]
 python-dotenv
 qrcode[pil]
 requests
+pyserial
