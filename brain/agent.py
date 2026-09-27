@@ -253,12 +253,13 @@ class Teddy:
             self._pose("listening", "listen")
         screen.publish({"type": "listening", "on": True})
         try:
-            if self._voice_loop_on:
+            screen_only = not self._voice_loop_on and isinstance(self.mic, MockVoice) and not self.mic.interactive
+            if self._voice_loop_on or screen_only:  # no mic loop in mock mode: answers come from screen taps
                 while not self._answers.empty():
                     self._answers.get_nowait()
                 self._awaiting.set()
                 try:
-                    wait = 60 if isinstance(self.mic, MockVoice) and self.mic.interactive else seconds + 6
+                    wait = 60 if isinstance(self.mic, MockVoice) else seconds + 6
                     text = self._answers.get(timeout=wait)
                 except queue.Empty:
                     text = ""

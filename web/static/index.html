@@ -3,241 +3,286 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#fbf4e6">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Teddy's Screen</title>
+<title>Teddy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Gaegu:wght@400;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #000; --fg: #fff; --muted: #d0d0d0; --card: #141414; --line: #3a3a3a;
-    --yellow: #ffd60a; --on-yellow: #000; --blue: #7cc4ff; --red: #d0142f; --green: #2fbf71;
-    --radius: 24px;
-    --font: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    --paper: #fbf4e6; --sheet: #fffdf7; --ink: #4a2f1b; --ink-2: #7a5738; --line: #5b3a22;
+    --butter: #ffe6a0; --blush: #f7c6bb; --mint: #cbe8d2; --sky: #cde2f4; --lilac: #e2d4f1; --fur: #d9a36a; --muzzle: #f4dcba;
+    --good: #2f7d4a; --tomato: #c8452d;
+    --hand: "Gaegu", "Comic Sans MS", "Chalkboard SE", cursive;
+    --read: "Andika", "Trebuchet MS", system-ui, sans-serif;
+    --wobble: 255px 18px 225px 18px / 18px 225px 18px 255px;   /* hand-drawn corners */
+    --wobble-2: 18px 225px 18px 255px / 255px 18px 225px 18px;
+    --lift: 4px 5px 0 rgba(74, 47, 27, .16);                      /* paper cut-out shadow, no blur */
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--fg); }
-  body { font: 600 20px/1.35 var(--font); min-height: 100dvh;
-         padding: env(safe-area-inset-top) 16px calc(12px + env(safe-area-inset-bottom)); }
-  button, .btn { font: inherit; cursor: pointer; touch-action: manipulation; border: 0; text-decoration: none; }
-  :focus-visible { outline: 5px solid var(--blue); outline-offset: 3px; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background-color: var(--paper); color: var(--ink); font: 400 22px/1.4 var(--read);
+    /* paper grain: fine noise, not a gradient */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .25 0 0 0 0 .15 0 0 0 .07 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E");
+    padding: calc(22px + env(safe-area-inset-top)) 18px calc(14px + env(safe-area-inset-bottom));
+    min-height: 100dvh; -webkit-tap-highlight-color: transparent;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
+  :focus-visible { outline: 4px dashed var(--ink); outline-offset: 4px; }
+  [hidden] { display: none !important; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  h1, h2, h3, .hand { font-family: var(--hand); font-weight: 700; letter-spacing: .01em; }
 
-  /* ---------- wake overlay (unlocks audio on iPad) ---------- */
-  #wake { position: fixed; inset: 0; z-index: 50; background: radial-gradient(circle at 50% 35%, #3a2a12, #000 70%);
-          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 24px; text-align: center; }
-  #wake .bear { font-size: 150px; line-height: 1; animation: bob 3s ease-in-out infinite; }
-  #wakeBtn { background: var(--yellow); color: #000; font-size: 40px; font-weight: 800; padding: 28px 56px; border-radius: 999px;
-             min-width: min(520px, 90vw); box-shadow: 0 10px 40px rgba(255,214,10,.35); }
-  #wake p { color: var(--muted); max-width: 520px; margin: 0; }
-  #remoteBtn, .linkish { background: transparent; color: var(--blue); text-decoration: underline; font-size: 18px; padding: 12px; }
-  #awakeBox, #sleepBox { display: flex; flex-direction: column; align-items: center; gap: 18px; }
-  #awakeBox[hidden], #sleepBox[hidden], #checking[hidden] { display: none; }
-  #wake.checking #awakeBox { display: none; }
-  .sleep-title { font-size: 40px; margin: 0; }
-  #demoBtn { background: var(--yellow); color: #000; font-size: 32px; font-weight: 800; padding: 22px 48px; border-radius: 999px; min-width: min(480px, 90vw); }
-  .addr { color: var(--muted); font-size: 17px; } .addr summary { cursor: pointer; padding: 8px; }
-  .addr form { display: flex; gap: 8px; margin-top: 8px; }
-  .addr input { font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 12px; border: 2px solid #fff; background: #000; color: #fff; width: min(340px, 60vw); }
-  .addr button { background: #fff; color: #000; border-radius: 12px; padding: 0 16px; }
-  #woke { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60; }
-  #woke button { background: var(--green); color: #000; font-size: 20px; font-weight: 800; padding: 14px 24px; border-radius: 999px; }
-  .demo-flag { background: var(--yellow); color: #000; font-size: 14px; font-weight: 800; padding: 4px 10px; border-radius: 999px; }
-  body.awake #wake { display: none; }
+  /* ---------- layout ---------- */
+  .app { display: grid; gap: 18px; min-height: calc(100dvh - 40px); grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+  @media (min-width: 900px) and (orientation: landscape) {
+    .app { grid-template-columns: minmax(300px, 38%) 1fr; grid-template-rows: 1fr auto; height: calc(100dvh - 40px); }
+    .buddy { grid-row: 1; } .page { grid-row: 1; } .dock { grid-column: 1 / -1; }
+  }
+  .buddy { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding-top: 6px; }
+  .face { width: min(78vw, 340px); aspect-ratio: 300 / 280; }
+  @media (min-width: 900px) and (orientation: landscape) { .face { width: min(30vw, 380px); } }
+  .bubble { position: relative; background: var(--sheet); border: 3px solid var(--line); border-radius: var(--wobble);
+            box-shadow: var(--lift); padding: 14px 20px; max-width: 30ch; min-height: 64px; font-size: 24px; text-align: center; }
+  .bubble::before { content: ""; position: absolute; top: -16px; left: 50%; width: 26px; height: 26px; background: var(--sheet);
+                    border-left: 3px solid var(--line); border-top: 3px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+  .bubble:empty::after { content: "Say \201CHey Teddy!\201D"; color: var(--ink-2); font-family: var(--hand); font-size: 26px; }
+  .status { font-family: var(--hand); font-size: 20px; color: var(--ink-2); display: flex; gap: 8px; align-items: center; }
+  .status i { width: 12px; height: 12px; border-radius: 50%; background: var(--good); border: 2px solid var(--line); }
+  .status.off i { background: var(--tomato); } .status.demo i { background: var(--butter); }
 
-  /* ---------- top bar ---------- */
-  header { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
-  nav.tabs { display: flex; gap: 6px; background: var(--card); border-radius: 999px; padding: 5px; border: 2px solid var(--line); }
-  nav.tabs a { color: var(--fg); padding: 10px 20px; border-radius: 999px; text-decoration: none; font-size: 18px; }
-  nav.tabs a[aria-current="page"] { background: var(--yellow); color: #000; }
-  #pill { margin-left: auto; font-size: 17px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-  #pill .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--green); }
-  #pill.off .dot { background: var(--red); }
-  #pill.listening .dot { background: var(--blue); animation: pulse 1s infinite; }
-  #pill.speaking .dot { background: var(--yellow); animation: pulse .6s infinite; }
+  /* ---------- the one big card ---------- */
+  .page { position: relative; background: var(--sheet); border: 3px solid var(--line); border-radius: var(--wobble-2);
+          box-shadow: var(--lift); padding: 30px 28px 26px; display: flex; flex-direction: column; min-height: 360px; overflow: auto; }
+  .page::before, .page::after { content: ""; position: absolute; top: -14px; width: 110px; height: 30px; background: rgba(255, 230, 160, .75);
+          border: 1px solid rgba(74, 47, 27, .15); }
+  .page::before { left: 36px; transform: rotate(-4deg); } .page::after { right: 36px; transform: rotate(3deg); }
+  .page h2 { font-size: 44px; margin: 0 0 6px; line-height: 1.05; }
+  .page .sub { color: var(--ink-2); margin: 0 0 18px; font-size: 22px; }
+  .center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 14px; }
 
-  /* ---------- layout: stage + controls ---------- */
-  .app { display: grid; gap: 16px; grid-template-columns: 1fr; }
-  @media (min-width: 900px) { .app { grid-template-columns: minmax(0, 1fr) 380px; height: calc(100dvh - 90px); }
-    .side { overflow: hidden; display: flex; flex-direction: column; } #feed { flex: 1; } }
-  .stage { position: relative; background: var(--card); border: 2px solid var(--line); border-radius: 32px; overflow: hidden;
-           min-height: 56dvh; display: flex; flex-direction: column; }
-  .scene { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-           padding: 24px 24px 110px; text-align: center; }
-  #subs { position: absolute; left: 16px; right: 16px; bottom: 16px; background: rgba(0,0,0,.82); color: #fff;
-          border-radius: 18px; padding: 14px 18px; font-size: 24px; min-height: 1em; display: none; }
-  #subs.on { display: block; }
-  #subs b { color: var(--yellow); }
+  /* ---------- big buttons ---------- */
+  .dock { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (min-width: 700px) { .dock { grid-template-columns: repeat(4, 1fr); } }
+  .big { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 104px; padding: 12px 16px;
+         border: 3px solid var(--line); border-radius: var(--wobble); box-shadow: var(--lift); font: 700 30px/1.05 var(--hand); }
+  .big:active { transform: translate(3px, 4px); box-shadow: 1px 1px 0 rgba(74, 47, 27, .16); }
+  .big svg { width: 58px; height: 58px; flex: none; }
+  .c-butter { background: var(--butter); } .c-blush { background: var(--blush); } .c-mint { background: var(--mint); }
+  .c-sky { background: var(--sky); } .c-lilac { background: var(--lilac); } .c-sheet { background: var(--sheet); }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
+  .row .big { min-width: 180px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+  .tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 150px;
+          border: 3px solid var(--line); border-radius: var(--wobble-2); box-shadow: var(--lift); font: 700 28px var(--hand); padding: 12px; }
+  .tile svg { width: 72px; height: 72px; }
+  .tile:active { transform: translate(3px, 4px); box-shadow: 1px 1px 0 rgba(74, 47, 27, .16); }
+  .ico { fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .ico .dot { fill: var(--line); stroke: none; }
 
-  .bigbear { font-size: min(34vw, 220px); line-height: 1; animation: bob 3.5s ease-in-out infinite; }
-  .hello { font-size: 30px; max-width: 26ch; }
-  .caption { font-size: 30px; font-weight: 700; max-width: 30ch; }
-  .dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
-  .wave { display: inline-block; animation: wave 1s ease-in-out 3; transform-origin: 70% 70%; }
+  /* ---------- steps ---------- */
+  .steps-dots { display: flex; gap: 8px; margin: 0 0 18px; flex-wrap: wrap; }
+  .steps-dots i { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--line); background: var(--sheet); }
+  .steps-dots i.done { background: var(--mint); } .steps-dots i.now { background: var(--butter); transform: scale(1.25); }
+  .step { display: flex; align-items: center; gap: 22px; margin: 6px 0 10px; }
+  .num { flex: none; width: 96px; height: 96px; border: 4px solid var(--line); border-radius: 50% 46% 52% 48%; background: var(--butter);
+         display: grid; place-items: center; font: 700 56px var(--hand); }
+  .step .say { font-size: 38px; line-height: 1.2; font-weight: 700; }
+  .drawing { flex: 0 0 auto; width: min(260px, 60%); height: auto; aspect-ratio: 1; margin: 4px auto; display: block; }
+  .drawing .ink { fill: none; stroke: var(--line); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+  .drawing .ink .fill { fill: var(--line); }
+  .drawing .new { stroke: var(--tomato); } .drawing .new .fill { fill: var(--tomato); }
+  .waiting { font-family: var(--hand); color: var(--ink-2); font-size: 22px; text-align: center; min-height: 1.4em; }
 
-  /* find */
-  .shot { position: relative; width: min(100%, 760px); border-radius: 20px; overflow: hidden; border: 4px solid var(--yellow); background: #000; }
-  .shot img { display: block; width: 100%; height: auto; }
-  .shot .box { position: absolute; border: 5px solid var(--yellow); border-radius: 10px; box-shadow: 0 0 0 4px rgba(0,0,0,.6); }
-  .badge { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 999px; font-size: 24px; font-weight: 800; }
-  .badge.found { background: var(--green); color: #000; }
-  .badge.seen { background: var(--yellow); color: #000; }
-  .badge.none { background: #333; color: #fff; }
-
-  /* story */
-  .story { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-           gap: 18px; padding: 24px 24px 110px; transition: background .8s; }
-  .story h2 { margin: 0; font-size: 26px; background: rgba(0,0,0,.55); padding: 8px 18px; border-radius: 999px; }
-  .story .art { font-size: min(22vw, 150px); line-height: 1.1; animation: float 4s ease-in-out infinite; filter: drop-shadow(0 8px 16px rgba(0,0,0,.35)); }
-  .story .page { background: rgba(255,255,255,.94); color: #111; border-radius: 24px; padding: 20px 26px; font-size: 32px;
-                 line-height: 1.35; max-width: 30ch; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-  .pager { display: flex; gap: 10px; } .pager i { width: 16px; height: 16px; border-radius: 50%; background: rgba(255,255,255,.45); }
-  .pager i.on { background: #fff; transform: scale(1.3); }
-  .sc-day { background: linear-gradient(#7cc8ff, #fff3b0); } .sc-night { background: linear-gradient(#141f5c, #45207a); }
-  .sc-sunset { background: linear-gradient(#ff8a4c, #ffd29d 55%, #b76cc4); } .sc-forest { background: linear-gradient(#1f6b3c, #9fe29a); }
-  .sc-ocean { background: linear-gradient(#0a6fb0, #90e0ef); } .sc-snow { background: linear-gradient(#bcdcff, #ffffff); }
-  .sc-space { background: radial-gradient(circle at 30% 20%, #3a1c71, #07071f 70%); } .sc-meadow { background: linear-gradient(#8fd3ff, #bff08a 60%, #6fbf4a); }
-  .sc-castle { background: linear-gradient(#a58ed8, #ffd6ec); } .sc-rain { background: linear-gradient(#546e7a, #b0c4d4); }
-
-  /* homework */
-  .hw { width: min(100%, 780px); text-align: left; }
-  .hw .q { font-size: 26px; color: var(--muted); margin: 0 0 12px; }
-  .hw ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
-  .hw li { background: #1f1f1f; border: 3px solid var(--line); border-radius: 18px; padding: 16px 20px; opacity: .5; transition: all .3s; }
-  .hw li.cur { opacity: 1; border-color: var(--yellow); transform: scale(1.02); }
-  .hw li.done { opacity: .9; }
+  /* ---------- homework ---------- */
+  .problem { font: 700 60px/1 var(--hand); text-align: center; margin: 0 0 8px; }
+  .hw { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 10px; }
+  .hw li { display: flex; align-items: center; gap: 12px; font: 700 34px var(--hand); padding: 4px 14px; border-radius: var(--wobble); border: 3px dashed transparent; }
+  .hw li.now { border-color: var(--line); background: var(--butter); }
+  .hw li .ans { color: var(--good); } .hw li .q { color: var(--tomato); animation: blink 1.2s steps(2) infinite; }
   .hw li[hidden] { display: none; }
-  .hw .math { font: 800 40px/1.2 ui-monospace, "SF Mono", Menlo, monospace; color: #fff; overflow-wrap: anywhere; }
-  .hw .say { font-size: 20px; color: var(--muted); margin-top: 6px; }
-  .answer { font-size: 60px; font-weight: 900; color: #000; background: var(--yellow); border-radius: 22px; padding: 10px 28px; }
+  .pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .pad button { min-height: 58px; font: 700 34px var(--hand); background: var(--sheet); border: 3px solid var(--line); border-radius: var(--wobble); box-shadow: var(--lift); }
+  .pad button:active { transform: translate(2px, 3px); }
+  .pad .go { background: var(--mint); grid-column: span 2; font-size: 30px; } .pad .hint { background: var(--lilac); grid-column: span 2; font-size: 30px; }
+  .typed { font: 700 44px var(--hand); min-height: 52px; text-align: center; border-bottom: 3px dashed var(--line); margin: 0 auto 12px; min-width: 160px; }
+  .yay { font: 700 64px var(--hand); color: var(--good); }
+  .hwgrid { display: grid; gap: 18px; align-items: start; }
+  @media (min-width: 1000px) { .hwgrid { grid-template-columns: 1fr 1fr; } }
 
-  /* cpr */
-  .cpr-stage { background: radial-gradient(circle, #4a0010, #000 70%); }
-  .heart { font-size: min(40vw, 240px); line-height: 1; animation: beat var(--beat, .545s) ease-in-out infinite; }
-  .push { font-size: 64px; font-weight: 900; letter-spacing: .06em; animation: beat var(--beat, .545s) ease-in-out infinite; }
+  /* ---------- find / read / badge ---------- */
+  .polaroid { width: fit-content; background: #fff; padding: 12px 12px 42px; border: 2px solid rgba(74, 47, 27, .25); box-shadow: var(--lift); transform: rotate(-1.5deg);
+              position: relative; max-width: min(100%, 560px); margin: 0 auto; }
+  .polaroid img { display: block; width: 100%; height: auto; max-height: 44vh; object-fit: contain; }
+  .polaroid .box { position: absolute; border: 5px solid var(--tomato); border-radius: 14px; }
+  .polaroid figcaption { position: absolute; left: 0; right: 0; bottom: 8px; text-align: center; font: 700 24px var(--hand); }
+  .note { display: inline-block; background: var(--butter); border: 2px solid rgba(74, 47, 27, .3); padding: 8px 14px; font: 700 26px var(--hand);
+          transform: rotate(1.5deg); box-shadow: var(--lift); margin-top: 16px; }
+  .reading { font-size: 40px; line-height: 1.45; font-weight: 700; }
+  .medal { width: 220px; height: 240px; }
+  .qr { width: 190px; height: 190px; image-rendering: pixelated; border: 3px solid var(--line); border-radius: 12px; background: #fff; padding: 6px; }
+  .spark { animation: pop .6s ease-out both; }
 
-  /* answer / read / check */
-  .card { background: #fff; color: #111; border-radius: 26px; padding: 24px 28px; max-width: 34ch; font-size: 30px; text-align: left; }
-  .card.urgent { border: 8px solid var(--red); }
-  .card small { display: block; margin-top: 14px; font-size: 18px; color: #444; }
-  .choices { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; }
-  .choices button { background: #fff; color: #000; font-size: 28px; padding: 18px 28px; border-radius: 20px; min-height: 84px; min-width: 180px; }
-  .choices .help { background: var(--red); color: #fff; }
-  .status-ok { color: var(--green); } .status-bad { color: #ff6b6b; }
-  .stopbig { background: #fff; color: #000; font-size: 28px; padding: 16px 40px; border-radius: 999px; min-height: 72px; }
-  a.call { background: var(--red); color: #fff; font-size: 30px; padding: 16px 32px; border-radius: 999px; text-decoration: none; }
+  /* ---------- full-screen modes: breathe + CPR ---------- */
+  .overlay { position: fixed; inset: 0; z-index: 30; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 24px;
+             background-color: var(--paper); background-image: inherit; padding: 24px; text-align: center; }
+  .overlay.on { display: flex; }
+  .breath { width: 240px; height: 240px; border-radius: 50%; background: var(--sky); border: 4px solid var(--line); animation: breathe 8s ease-in-out infinite; }
+  .breath-word { font: 700 52px var(--hand); }
+  .breath-word::after { content: "Breathe in…"; animation: breatheword 8s steps(1) infinite; }
+  #cpr { background: #fff6ef; }
+  #cpr .cprcard { background: var(--sheet); border: 4px solid var(--line); border-radius: var(--wobble); box-shadow: var(--lift);
+                  padding: 28px 32px; max-width: 900px; width: 100%; }
+  #cpr .cprcard.first { background: var(--blush); }
+  #cpr .cprcard h2 { font-size: 64px; margin: 0 0 10px; line-height: 1.05; }
+  #cpr .cprcard p { font-size: 32px; margin: 0; }
+  #cpr .count { font: 700 min(38vw, 260px)/1 var(--hand); color: var(--tomato); }
+  #cpr .count.beat { animation: beat var(--beat, .545s) ease-out; }
+  #cpr .src { color: var(--ink-2); font-size: 18px; }
+  #cpr .call { display: inline-block; background: var(--tomato); color: #fff; font: 700 34px var(--hand); padding: 14px 30px; border-radius: var(--wobble);
+               border: 3px solid var(--line); text-decoration: none; }
 
-  /* controls */
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .grid button { background: var(--yellow); color: var(--on-yellow); font-size: 22px; border-radius: var(--radius); min-height: 96px;
-                 display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 10px; }
-  .grid button .ico { font-size: 36px; line-height: 1; }
-  .grid .cpr { background: var(--red); color: #fff; }
-  .grid .alt { background: #fff; }
-  .grid button:active { transform: scale(.97); }
-  form.talk { display: flex; gap: 10px; margin-top: 12px; }
-  form.talk input { flex: 1; min-width: 0; font: inherit; font-size: 20px; padding: 0 16px; min-height: 62px; border-radius: 16px;
-                    border: 3px solid var(--fg); background: #000; color: #fff; }
-  form.talk button { background: #fff; color: #000; border-radius: 16px; padding: 0 18px; min-height: 62px; font-size: 20px; }
-  #feed { list-style: none; margin: 12px 0 0; padding: 10px 14px; background: var(--card); border: 2px solid var(--line);
-          border-radius: 20px; overflow-y: auto; max-height: 36dvh; font-size: 17px; }
-  @media (min-width: 900px) { #feed { max-height: none; } }
-  #feed li { padding: 7px 0; border-bottom: 1px solid #262626; }
-  #feed li:last-child { border-bottom: 0; }
-  #feed .who { color: var(--yellow); } #feed .you .who { color: var(--blue); }
-  #feed .alert { background: var(--red); border-radius: 10px; padding: 8px 10px; }
-  #feed .meta { color: var(--muted); font-weight: 500; }
-  dialog { background: #000; color: #fff; border: 3px solid var(--yellow); border-radius: var(--radius); width: min(100vw - 24px, 560px); padding: 20px; }
-  dialog::backdrop { background: rgba(0,0,0,.8); }
-  dialog h2 { margin: 0 0 14px; font-size: 28px; }
-  dialog .grid button { min-height: 84px; }
+  /* ---------- wake / sleep ---------- */
+  #wake { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+          background-color: var(--paper); background-image: inherit; padding: 24px; text-align: center; }
+  body.awake #wake { display: none; }
+  #wake .face { width: min(70vw, 34vh, 300px); }
+  #wake h1 { font-size: 56px; margin: 0; }
+  #wake .center { flex: none; }
+  #wake p { margin: 0; color: var(--ink-2); max-width: 32ch; }
+  .linkish { background: none; border: 0; color: var(--ink); text-decoration: underline; font-family: var(--hand); font-size: 24px; padding: 10px; }
+  #addr { font: inherit; font-size: 18px; padding: 10px; border: 3px solid var(--line); border-radius: 12px; background: var(--sheet); width: min(360px, 70vw); }
+  #woke { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 50; }
 
-  @keyframes bob { 50% { transform: translateY(-10px) rotate(-2deg); } }
-  @keyframes float { 50% { transform: translateY(-14px); } }
-  @keyframes beat { 0%, 100% { transform: scale(1); } 30% { transform: scale(1.18); } }
-  @keyframes pulse { 50% { opacity: .35; } }
-  @keyframes wave { 25% { transform: rotate(20deg); } 75% { transform: rotate(-12deg); } }
-  @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
-  @keyframes dance { 25% { transform: translateY(-24px) rotate(-10deg); } 75% { transform: translateY(-24px) rotate(10deg); } }
-  .dance { font-size: min(26vw, 170px); display: flex; gap: 10px; } .dance span { display: inline-block; animation: dance .7s ease-in-out infinite; }
-  .dance span:nth-child(2) { animation-delay: .15s; } .dance span:nth-child(3) { animation-delay: .3s; }
-  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  /* ---------- Teddy's face ---------- */
+  .face .ln { fill: none; stroke: var(--line); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+  .face .fur { fill: var(--fur); } .face .in { fill: var(--blush); } .face .muz { fill: var(--muzzle); }
+  .face .dark { fill: var(--line); } .face .glint { fill: #fff; }
+  .face .cheek { fill: var(--blush); opacity: 0; transition: opacity .3s; }
+  .face [data-when] { display: none; }
+  .face.idle [data-when~="idle"], .face.listening [data-when~="listening"], .face.thinking [data-when~="thinking"],
+  .face.talking [data-when~="talking"], .face.happy [data-when~="happy"], .face.caring [data-when~="caring"],
+  .face.sleeping [data-when~="sleeping"] { display: inline; }
+  .face.happy .cheek, .face.caring .cheek, .face.talking .cheek { opacity: .75; }
+  .face .ear-l, .face .ear-r { transform-box: fill-box; transform-origin: center bottom; transition: transform .35s; }
+  .face.listening .ear-l { transform: rotate(-14deg) translateY(-6px); } .face.listening .ear-r { transform: rotate(14deg) translateY(-6px); }
+  .face .head { transform-box: view-box; transform-origin: 150px 260px; transition: transform .4s; }
+  .face.listening .head { transform: rotate(-5deg); } .face.thinking .head { transform: rotate(4deg); }
+  .face.happy .head { animation: hop .7s ease-out; }
+  .face .blink { transform-box: fill-box; transform-origin: center; animation: blinky 5s infinite; }
+  .face .mouth-open { transform-box: fill-box; transform-origin: center top; animation: chatter .28s ease-in-out infinite alternate; }
+  .face .dots circle { animation: think 1.4s ease-in-out infinite; } .face .dots circle:nth-child(2) { animation-delay: .2s; } .face .dots circle:nth-child(3) { animation-delay: .4s; }
+
+  @keyframes blinky { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.1); } }
+  @keyframes chatter { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+  @keyframes think { 50% { transform: translateY(-5px); opacity: .5; } }
+  @keyframes hop { 40% { transform: translateY(-12px); } }
+  @keyframes blink { 50% { opacity: .2; } }
+  @keyframes pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes breathe { 0%, 100% { transform: scale(.6); } 50% { transform: scale(1.15); } }
+  @keyframes breatheword { 0% { content: "Breathe in…"; } 50% { content: "Breathe out…"; } }
+  @keyframes beat { 0% { transform: scale(1.18); } 100% { transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition: none !important; } }
 </style>
 </head>
 <body>
-<div id="wake" role="dialog" aria-modal="true" aria-labelledby="wakeTitle">
-  <div class="bear" aria-hidden="true" id="wakeBear">🧸</div>
-  <div id="awakeBox">
-    <h1 id="wakeTitle" class="sr">Teddy</h1>
-    <button id="wakeBtn" type="button">Wake Teddy 🧸</button>
-    <p>Tap once so Teddy can talk through this screen.</p>
-    <button id="remoteBtn" type="button">Use as a remote (no sound)</button>
-  </div>
-  <div id="sleepBox" hidden>
-    <h1 class="sleep-title">Teddy is sleeping</h1>
-    <p>His computer is offline right now. You can still see what he does.</p>
-    <button id="demoBtn" type="button">Watch a demo 🧸</button>
-    <button id="retryBtn" type="button" class="linkish">Try waking him again</button>
-    <details class="addr"><summary>Teddy's address</summary>
-      <form id="addrForm"><label class="sr" for="addr">Teddy's address</label>
-        <input id="addr" type="url" inputmode="url" placeholder="https://….trycloudflare.com" autocomplete="off">
-        <button type="submit">Connect</button></form></details>
-  </div>
-  <p id="checking">Looking for Teddy…</p>
-</div>
-<div id="woke" hidden role="alert"><button type="button" onclick="location.reload()">🧸 Teddy woke up! Tap to connect</button></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="crayon"><feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="2" seed="7"/><feDisplacementMap in="SourceGraphic" scale="2.6"/></filter>
+    <symbol id="i-keys" viewBox="0 0 48 48"><circle cx="15" cy="16" r="9"/><circle cx="15" cy="16" r="3"/><path d="M21 22 L40 41 M33 34 l5 -5 M37 38 l4 -4"/></symbol>
+    <symbol id="i-shoes" viewBox="0 0 48 48"><path d="M5 34 q1 -14 9 -16 l7 6 q9 3 16 3 q8 1 8 7 v2 H5 z"/><path d="M5 38 h40 M17 23 l3 -3 M21 26 l3 -3 M25 28 l3 -3"/></symbol>
+    <symbol id="i-backpack" viewBox="0 0 48 48"><rect x="11" y="13" width="26" height="30" rx="9"/><path d="M18 13 v-3 q6 -6 12 0 v3 M16 29 h16 v9 h-16 z M24 29 v4"/></symbol>
+    <symbol id="i-bunny" viewBox="0 0 48 48"><path d="M18 21 q-5 -17 1 -19 q5 2 3 19 M30 21 q5 -17 -1 -19 q-5 2 -3 19"/><circle cx="24" cy="31" r="12"/><circle class="dot" cx="19.5" cy="29" r="1.8"/><circle class="dot" cx="28.5" cy="29" r="1.8"/><path d="M22 35 q2 2 4 0"/></symbol>
+    <symbol id="i-remote" viewBox="0 0 48 48"><rect x="15" y="5" width="18" height="38" rx="6"/><circle cx="24" cy="13" r="3"/><circle class="dot" cx="20" cy="22" r="1.8"/><circle class="dot" cx="28" cy="22" r="1.8"/><circle class="dot" cx="20" cy="29" r="1.8"/><circle class="dot" cx="28" cy="29" r="1.8"/></symbol>
+    <symbol id="i-homework" viewBox="0 0 48 48"><path d="M9 7 h21 l9 9 v25 h-30 z M30 7 v9 h9"/><path d="M15 22 h17 M15 28 h17 M15 34 h10"/></symbol>
+    <symbol id="i-howto" viewBox="0 0 48 48"><path d="M8 12 l3 3 l6 -6 M23 12 h17 M8 24 l3 3 l6 -6 M23 24 h17 M9 36 h6 M23 36 h17"/></symbol>
+    <symbol id="i-read" viewBox="0 0 48 48"><path d="M24 13 q-8 -5 -19 -3 v27 q11 -2 19 3 q8 -5 19 -3 v-27 q-11 -2 -19 3 z M24 13 v27"/></symbol>
+    <symbol id="i-shoe" viewBox="0 0 48 48"><use href="#i-shoes"/></symbol>
+    <symbol id="i-tooth" viewBox="0 0 48 48"><path d="M13 9 q11 -5 22 0 q6 5 2 17 l-3 14 q-2 4 -5 0 l-3 -9 l-3 9 q-3 4 -5 0 l-3 -14 q-4 -12 1 -17 z"/></symbol>
+    <symbol id="i-cat" viewBox="0 0 48 48"><path d="M12 20 l-2 -13 l11 7 M36 20 l2 -13 l-11 7"/><circle cx="24" cy="27" r="14"/><circle class="dot" cx="19" cy="25" r="2"/><circle class="dot" cx="29" cy="25" r="2"/><path d="M22 31 h4 l-2 2 z M12 30 l-7 -1 M12 33 l-7 2 M36 30 l7 -1 M36 33 l7 2"/></symbol>
+    <symbol id="i-hands" viewBox="0 0 48 48"><path d="M24 7 q11 15 11 22 a11 11 0 0 1 -22 0 q0 -7 11 -22 z"/><circle cx="39" cy="11" r="3.5"/><circle cx="9" cy="16" r="2.5"/><circle cx="41" cy="22" r="2"/></symbol>
+    <symbol id="i-bed" viewBox="0 0 48 48"><path d="M5 36 v-19 M5 29 h38 v7 M43 36 v-10 q0 -6 -6 -6 h-15 v9 M9 22 h9 v7 h-9 z"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 48 48"><path d="M14 25 v-12 q0 -3 3 -3 q3 0 3 3 v9 m0 -12 q0 -3 3 -3 q3 0 3 3 v12 m0 -9 q0 -3 3 -3 q3 0 3 3 v9 m0 -4 q0 -3 3 -3 q3 0 3 3 v10 q0 13 -12 13 h-3 q-8 0 -11 -8 l-4 -8 q-2 -3 1 -5 q3 -1 5 3 l2 3"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 48 48"><path d="M4 24 q20 -19 40 0 q-20 19 -40 0 z"/><circle cx="24" cy="24" r="7"/><circle class="dot" cx="24" cy="24" r="2.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 48 48"><path d="M24 5 l5.5 12.5 13.5 1.3 -10.3 9 3 13.4 -11.7 -7 -11.7 7 3 -13.4 -10.3 -9 13.5 -1.3 z"/></symbol>
+  </defs>
+</svg>
 
-<header>
-  <nav class="tabs" aria-label="Pages">
-    <a href="/teddy" data-link aria-current="page"><span aria-hidden="true">🧸</span> Teddy</a>
-    <a href="/caregiver" data-link><span aria-hidden="true">📊</span> Caregiver</a>
-  </nav>
-  <div id="pill" role="status"><span class="dot" aria-hidden="true"></span><span id="pillText">Connecting…</span></div>
-</header>
+<template id="faceTpl">
+  <svg class="face idle" viewBox="0 0 300 280" role="img" aria-label="Teddy's face">
+    <g class="head" filter="url(#crayon)">
+      <g class="ear-l"><circle class="fur ln" cx="68" cy="70" r="42"/><circle class="in" cx="68" cy="72" r="22"/></g>
+      <g class="ear-r"><circle class="fur ln" cx="232" cy="70" r="42"/><circle class="in" cx="232" cy="72" r="22"/></g>
+      <ellipse class="fur ln" cx="150" cy="155" rx="120" ry="108"/>
+      <ellipse class="cheek" cx="80" cy="185" rx="20" ry="13"/><ellipse class="cheek" cx="220" cy="185" rx="20" ry="13"/>
+      <ellipse class="muz ln" cx="150" cy="195" rx="58" ry="44"/>
+      <g data-when="idle listening talking">
+        <g class="blink"><ellipse class="dark" cx="105" cy="138" rx="12" ry="15"/><circle class="glint" cx="109" cy="132" r="4"/></g>
+        <g class="blink"><ellipse class="dark" cx="195" cy="138" rx="12" ry="15"/><circle class="glint" cx="199" cy="132" r="4"/></g>
+      </g>
+      <g data-when="thinking"><ellipse class="dark" cx="111" cy="130" rx="11" ry="14"/><ellipse class="dark" cx="201" cy="130" rx="11" ry="14"/>
+        <path class="ln" d="M88 108 q16 -10 32 -4 M180 104 q16 -6 32 4"/></g>
+      <g data-when="happy"><path class="ln" d="M90 142 q15 -20 30 0 M180 142 q15 -20 30 0"/></g>
+      <g data-when="caring"><path class="ln" d="M92 138 q13 10 26 0 M182 138 q13 10 26 0"/><path class="ln" d="M90 116 q14 -6 28 2 M182 118 q14 -8 28 -2"/></g>
+      <g data-when="sleeping"><path class="ln" d="M92 140 q13 8 26 0 M182 140 q13 8 26 0"/></g>
+      <path class="dark" d="M137 172 q13 -8 26 0 q-3 12 -13 14 q-10 -2 -13 -14 z"/>
+      <g data-when="idle listening thinking sleeping caring"><path class="ln" d="M150 186 v8 M150 194 q-14 13 -28 3 M150 194 q14 13 28 3"/></g>
+      <g data-when="happy"><path class="ln" d="M150 186 v6"/><path class="dark" d="M124 196 q26 30 52 0 q-26 8 -52 0 z"/></g>
+      <g data-when="talking"><path class="ln" d="M150 186 v6"/><ellipse class="dark mouth-open" cx="150" cy="206" rx="16" ry="13"/></g>
+      <g class="dots" data-when="thinking"><circle class="dark" cx="258" cy="28" r="6"/><circle class="dark" cx="276" cy="12" r="8"/><circle class="dark" cx="248" cy="8" r="4"/></g>
+      <g data-when="sleeping"><text x="236" y="42" font-family="Gaegu" font-weight="700" font-size="40" class="dark">z</text><text x="262" y="20" font-family="Gaegu" font-weight="700" font-size="28" class="dark">z</text></g>
+    </g>
+  </svg>
+</template>
+
+<div id="wake" role="dialog" aria-modal="true" aria-labelledby="wakeTitle">
+  <div id="wakeFace"></div>
+  <div id="awakeBox" class="center" hidden>
+    <h1 id="wakeTitle">Hi! I'm Teddy.</h1>
+    <button class="big c-butter" id="wakeBtn" type="button" style="min-width:min(420px,84vw)">Wake Teddy up</button>
+    <p>Tap once so I can talk out of this screen.</p>
+    <button class="linkish" id="remoteBtn" type="button">Just watch (no sound)</button>
+  </div>
+  <div id="sleepBox" class="center" hidden>
+    <h1>Teddy is sleeping</h1>
+    <p>His computer is off right now. Want to see what he can do?</p>
+    <button class="big c-butter" id="demoBtn" type="button" style="min-width:min(420px,84vw)">Show me a demo</button>
+    <button class="linkish" id="retryBtn" type="button">Try waking him again</button>
+    <details><summary class="linkish">Teddy's address</summary>
+      <form id="addrForm" class="row" style="margin-top:8px"><label class="sr" for="addr">Teddy's address</label>
+        <input id="addr" type="url" inputmode="url" placeholder="https://….trycloudflare.com" autocomplete="off">
+        <button class="big c-sheet" type="submit" style="min-height:56px;font-size:24px">Connect</button></form></details>
+  </div>
+  <p id="checking" class="hand" style="font-size:28px">Looking for Teddy…</p>
+</div>
+<div id="woke" hidden role="alert"><button class="big c-mint" type="button" onclick="location.reload()">Teddy woke up! Tap to connect</button></div>
 
 <div class="app">
-  <main class="stage" id="stage" aria-label="What Teddy is doing">
-    <div id="scene" class="scene"></div>
-    <div id="subs" aria-hidden="true"></div>
-  </main>
-  <div id="announce" class="sr" aria-live="polite"></div>
+  <section class="buddy" aria-label="Teddy">
+    <div id="faceHost"></div>
+    <div class="bubble" id="bubble" aria-live="polite"></div>
+    <div class="status" id="status" role="status"><i aria-hidden="true"></i><span id="statusText">Connecting…</span></div>
+  </section>
 
-  <aside class="side" aria-label="Ask Teddy">
-    <div class="grid">
-      <button type="button" id="findBtn" aria-haspopup="dialog"><span class="ico" aria-hidden="true">🔍</span>Find my…</button>
-      <button type="button" data-intent="story"><span class="ico" aria-hidden="true">📚</span>Tell me a story</button>
-      <button type="button" data-intent="read"><span class="ico" aria-hidden="true">📖</span>Read this</button>
-      <button type="button" data-intent="dance"><span class="ico" aria-hidden="true">💃</span>Dance</button>
-      <button type="button" data-intent="fall_check" class="alt"><span class="ico" aria-hidden="true">💛</span>Check on me</button>
-      <button type="button" data-intent="cpr_coach" class="cpr" aria-label="CPR mode. Teddy coaches chest compressions. Call 911 too.">
-        <span class="ico" aria-hidden="true">❤️</span>CPR mode</button>
-    </div>
-    <form class="talk" id="talk" aria-label="Say something to Teddy">
-      <label class="sr" for="talkText">Message to Teddy</label>
-      <input id="talkText" type="text" autocomplete="off" enterkeyhint="send" placeholder="Type to Teddy… (try 7 times 8)">
-      <button type="button" id="mic" hidden aria-label="Talk to Teddy with your voice"><span aria-hidden="true">🎤</span></button>
-      <button type="submit">Send</button>
-    </form>
-    <h2 class="sr">Conversation</h2>
-    <ul id="feed" aria-label="Conversation with Teddy, newest at the bottom"></ul>
-  </aside>
+  <main class="page" id="page" aria-live="polite" aria-label="What we're doing"></main>
+
+  <nav class="dock" aria-label="What should we do?">
+    <button class="big c-butter" type="button" data-go="find"><svg class="ico" aria-hidden="true"><use href="#i-keys"/></svg>Find my stuff</button>
+    <button class="big c-sky" type="button" data-go="homework"><svg class="ico" aria-hidden="true"><use href="#i-homework"/></svg>Homework help</button>
+    <button class="big c-mint" type="button" data-go="howto"><svg class="ico" aria-hidden="true"><use href="#i-howto"/></svg>Show me how</button>
+    <button class="big c-blush" type="button" data-go="read"><svg class="ico" aria-hidden="true"><use href="#i-read"/></svg>Read this</button>
+  </nav>
 </div>
 
-<dialog id="findDlg" aria-labelledby="findTitle">
-  <h2 id="findTitle">What should Teddy find?</h2>
-  <div class="grid">
-    <button type="button" data-find="keys"><span class="ico" aria-hidden="true">🔑</span>Keys</button>
-    <button type="button" data-find="glasses"><span class="ico" aria-hidden="true">👓</span>Glasses</button>
-    <button type="button" data-find="phone"><span class="ico" aria-hidden="true">📱</span>Phone</button>
-    <button type="button" data-find="remote"><span class="ico" aria-hidden="true">📺</span>Remote</button>
-    <button type="button" data-find="bunny"><span class="ico" aria-hidden="true">🐰</span>Bunny</button>
-    <button type="button" data-find="pill bottle"><span class="ico" aria-hidden="true">💊</span>Pills</button>
-  </div>
-  <form id="findOther" class="talk">
-    <label class="sr" for="findText">Something else</label>
-    <input id="findText" type="text" placeholder="Something else…" autocomplete="off" enterkeyhint="search">
-    <button type="submit">Find</button>
-  </form>
-  <button type="button" id="findClose" class="stopbig" style="margin-top:14px;width:100%">Cancel</button>
-</dialog>
+<div class="overlay" id="breathe" role="dialog" aria-modal="true" aria-label="Breathing with Teddy">
+  <div class="breath" aria-hidden="true"></div>
+  <div class="breath-word" aria-live="polite"></div>
+  <button class="big c-mint" type="button" style="min-width:260px" onclick="tell('I\'m okay')">I'm okay</button>
+</div>
+
+<div class="overlay" id="cpr" role="dialog" aria-modal="true" aria-label="CPR mode"></div>
 
 <script src="/config.js"></script>
 <script src="/teddy-api.js"></script>
@@ -245,244 +290,241 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const post = (p, body) => TEDDY.post(p, body).catch(() => {});
-const asset = u => (!u || /^(https?:|data:|\/demo\/)/.test(u)) ? u : TEDDY.url(u);  // frames/audio live on the Mac
-let DEMO = false;
-const act = (intent, extra = {}) => { navigator.vibrate?.(30); return DEMO ? Demo.play(intent, extra) : post('/api/action', { intent, ...extra }); };
+const asset = u => (!u || /^(https?:|data:|\/demo\/)/.test(u)) ? u : TEDDY.url(u);
+const icon = (name, cls = 'ico') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${esc(name)}"/></svg>`;
+let DEMO = false, speaker = false, S = { mode: 'idle' }, baseFace = 'idle', listening = false;
+const act = (intent, extra = {}) => { navigator.vibrate?.(25); return DEMO ? Demo.play(intent, extra) : post('/api/action', { intent, ...extra }); };
 const tell = text => DEMO ? Demo.tell(text) : post('/api/say', { text });
-let speaker = false, es = null, S = { mode: 'idle' }, idleTimer = null;
 
-/* ---------------- audio: every word Teddy says plays here ---------------- */
+/* ---------- Teddy's face ---------- */
+document.querySelectorAll('#faceHost, #wakeFace').forEach(h => h.append($('#faceTpl').content.cloneNode(true)));
+const faces = () => document.querySelectorAll('.face');
+function setFace(f) { faces().forEach(el => el.setAttribute('class', 'face ' + f)); }
+function refreshFace() { setFace(talking ? 'talking' : listening ? 'listening' : baseFace); }
+
+/* ---------- voice: everything Teddy says plays here ---------- */
 const audio = new Audio(); audio.preload = 'auto'; audio.setAttribute('playsinline', '');
 const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
 const sayQueue = []; let talking = false;
-
-function wake(asSpeaker) {
-  speaker = asSpeaker;
-  if (asSpeaker) {
-    audio.src = SILENT; audio.play().catch(() => {});                       // unlock <audio> on iOS
-    try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch {}  // unlock fallback voice
-    navigator.wakeLock?.request('screen').catch(() => {});
-  }
-  document.body.classList.add('awake');
-  connect();
-  $('#stage').focus?.();
-}
 function onSay(m) { sayQueue.push(m); if (!talking) nextSay(); }
 function nextSay() {
   const m = sayQueue.shift();
-  if (!m) { talking = false; setPill(); hideSubs(); return; }
-  talking = true; setPill(); showSubs(m.text);
-  if (!speaker) { setTimeout(() => { m.resolve?.(); nextSay(); }, Math.min(9000, 800 + m.text.length * 60)); return; }
+  if (!m) { talking = false; refreshFace(); return; }
+  talking = true; refreshFace(); $('#bubble').textContent = m.text;
   let finished = false;
-  const done = () => { if (finished) return; finished = true; if (!DEMO) post('/api/spoken/' + m.id); m.resolve?.(); nextSay(); };
-  if (DEMO) { fallbackVoice(m, done); return; }
-  audio.onended = done;
-  audio.onerror = () => fallbackVoice(m, done);
+  const done = () => { if (finished) return; finished = true; if (!DEMO && m.id !== 'demo') post('/api/spoken/' + m.id); m.resolve?.(); nextSay(); };
+  if (!speaker) { setTimeout(done, Math.min(9000, 700 + m.text.length * 55)); return; }
+  if (DEMO) { browserVoice(m.text, done, m.mood); return; }
+  audio.onended = done; audio.onerror = () => browserVoice(m.text, done, m.mood);
   audio.src = asset(m.audio || ('/api/tts/' + m.id));
-  audio.play().catch(() => fallbackVoice(m, done));
+  audio.play().catch(() => browserVoice(m.text, done, m.mood));
+}
+function browserVoice(text, done, mood) {
+  audio.onended = audio.onerror = null;
+  try {
+    const u = new SpeechSynthesisUtterance(text); u.rate = mood === 'reading' ? 0.8 : 0.98; u.pitch = 1.1;
+    u.onend = done; u.onerror = done; speechSynthesis.cancel(); speechSynthesis.speak(u);
+    setTimeout(done, 2500 + text.length * 95);
+  } catch { setTimeout(done, text.length * 60); }
 }
 function hush() {
   sayQueue.forEach(m => m.resolve?.()); sayQueue.length = 0; audio.pause(); audio.onended = audio.onerror = null;
-  try { speechSynthesis.cancel(); } catch {}
-  talking = false; setPill(); hideSubs();
-}
-function fallbackVoice(m, done) {
-  audio.onended = audio.onerror = null;
-  try {
-    const u = new SpeechSynthesisUtterance(m.text); u.rate = 0.95; u.pitch = 1.15;
-    u.onend = done; u.onerror = done; speechSynthesis.cancel(); speechSynthesis.speak(u);
-    setTimeout(done, 2500 + m.text.length * 90);  // safety net if onend never fires
-  } catch { setTimeout(done, m.text.length * 60); }
+  try { speechSynthesis.cancel(); } catch {} talking = false; refreshFace(); stopCount();
 }
 
-/* ---------------- live stream (SSE, or long-polling when a proxy buffers SSE) ---------------- */
+/* ---------- the big card ---------- */
+const page = $('#page');
+function render(m) {
+  const prev = S; S = m; baseFace = m.face || ({ think: 'thinking', listen: 'listening', badge: 'happy', talk: 'caring', idle: 'idle' }[m.mode] || baseFace);
+  refreshFace();
+  if (m.mode === 'cpr') return renderCPR(m, prev);
+  closeOverlay('cpr');
+  const V = VIEWS[m.mode] || VIEWS.idle;
+  page.innerHTML = V(m, prev);
+  page.querySelectorAll('[data-say]').forEach(b => b.addEventListener('click', () => { navigator.vibrate?.(20); tell(b.dataset.say); }));
+  page.querySelectorAll('[data-find]').forEach(b => b.addEventListener('click', () => act('find_object', { object: b.dataset.find })));
+  page.querySelectorAll('[data-guide]').forEach(b => b.addEventListener('click', () => act('howto', { guide_id: b.dataset.guide })));
+  if (m.mode === 'homework') wirePad();
+}
+const hello = () => `<div class="center"><h2>What should we do?</h2>
+  <p class="sub">Say <b>"Hey Teddy"</b>, or tap a button down below.</p>${icon('star', 'ico spark" style="width:90px;height:90px')}</div>`;
+const VIEWS = {
+  idle: hello,
+  think: m => `<div class="center"><h2>${esc(m.caption || 'Hmm, let me think…')}</h2></div>`,
+  listen: m => `<div class="center"><h2>${esc(m.caption || "I'm listening!")}</h2><p class="sub">Talk to me, I'm all ears.</p></div>`,
+  talk: m => `<div class="center"><h2>${esc(m.caption || '')}</h2></div>`,
+  find_menu: () => `<h2>What did you lose?</h2><p class="sub">Tap it, or just tell me.</p>
+    <div class="tiles">${[['keys', 'Keys', 'butter'], ['shoes', 'Shoes', 'sky'], ['backpack', 'Backpack', 'mint'], ['bunny', 'Bunny', 'blush'], ['remote', 'Remote', 'lilac']]
+      .map(([k, t, c]) => `<button class="tile c-${c}" type="button" data-find="${k}">${icon(k)}${t}</button>`).join('')}</div>`,
+  find: m => {
+    const note = m.status === 'found' ? 'Found it!' : m.status === 'last_seen' ? `Last seen ${esc(m.when || '')}${m.near ? ' · by the ' + esc(m.near) : ''}` : '';
+    let pic = '';
+    if (m.frame) {
+      const b = m.box && m.box.x != null && m.status !== 'found'
+        ? `<div class="box" style="left:${(m.box.x - (m.box.w || .14) / 2) * 100}%;top:${(m.box.y - (m.box.h || .14) / 2) * 100}%;width:${(m.box.w || .14) * 100}%;height:${(m.box.h || .14) * 100}%"></div>` : '';
+      pic = `<figure class="polaroid"><img src="${esc(asset(m.frame))}" alt="Picture of where your ${esc(m.object)} is">${b}<figcaption>your ${esc(m.object)}</figcaption></figure>`;
+    } else if (m.status !== 'looking') pic = `<div class="center">${icon(m.object in ICONS ? ICONS[m.object] : 'eye', 'ico" style="width:120px;height:120px')}</div>`;
+    return `<h2>${m.status === 'looking' ? `Looking for your ${esc(m.object)}…` : esc(m.caption || '')}</h2>
+      <div class="center">${pic}${note ? `<span class="note">${note}</span>` : ''}</div>`;
+  },
+  howto_menu: m => `<h2>${esc(m.caption || 'What should we learn?')}</h2><p class="sub">Tap one, or ask me "how do I…".</p>
+    <div class="tiles">${(m.guides || GUIDES).map((g, i) => `<button class="tile c-${['butter', 'sky', 'mint', 'blush', 'lilac'][i % 5]}" type="button" data-guide="${esc(g.id)}">${icon(g.icon)}${esc(g.title)}</button>`).join('')}</div>`,
+  howto: m => {
+    const st = m.steps[m.step] || {};
+    const dots = m.steps.map((_, i) => `<i class="${i < m.step ? 'done' : i === m.step ? 'now' : ''}"></i>`).join('');
+    const drawing = m.steps.some(s => s.draw) ? `<svg class="drawing" viewBox="0 0 200 200" aria-hidden="true"><g class="ink">${m.steps.slice(0, m.step + 1)
+      .map((s, i) => `<g class="${i === m.step ? 'new' : ''}">${s.draw || ''}</g>`).join('')}</g></svg>` : '';
+    return `<h2>${esc(m.guide.title)}</h2><div class="steps-dots" aria-label="Step ${m.step + 1} of ${m.total}">${dots}</div>
+      <div class="step"><div class="num" aria-hidden="true">${m.step + 1}</div><div class="say">${esc(st.show)}</div></div>
+      ${drawing}
+      <p class="waiting">${m.waiting ? 'Tell me "done" when you finish!' : ''}</p>
+      <div class="row"><button class="big c-mint" type="button" data-say="done">Done!</button>
+        <button class="big c-sheet" type="button" data-say="say it again">Say it again</button>
+        <button class="big c-lilac" type="button" data-say="help">Help</button></div>`;
+  },
+  homework: m => {
+    const solved = Object.fromEntries((m.solved || []).map(s => [s.i, s.value]));
+    const rows = m.steps.map((s, i) => {
+      const val = solved[i]; const now = i === m.step && !m.done;
+      const line = esc(s.show).replace('?', val != null ? `<span class="ans">${esc(val)}</span>` : '<span class="q">?</span>');
+      return `<li class="${now ? 'now' : ''}" ${i > m.step && !m.done ? 'hidden' : ''}>${line}</li>`;
+    }).join('');
+    return `<p class="sub" style="margin:0">${esc(m.question)}</p><div class="problem">${esc(m.problem)}</div>
+      <div class="hwgrid"><div><ol class="hw">${rows}</ol>${m.done ? '' : '<div class="typed" id="typed" aria-live="polite"></div>'}</div>
+      ${m.done ? '<div class="center"><div class="yay spark">You figured it out!</div></div>' :
+      `<div class="pad" role="group" aria-label="Number pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '/', 0].map(n => `<button type="button" data-k="${n}">${n}</button>`).join('')}
+         <button type="button" data-k="back" aria-label="Delete">⌫</button>
+         <button type="button" class="hint" data-say="help">Hint please</button><button type="button" class="go" data-k="go">That's it!</button></div>`}</div>`;
+  },
+  hint: m => `<p class="sub">${esc(m.question)}</p><h2 style="font-size:40px">${esc(m.hint)}</h2>
+    <p class="waiting">Tell me what you think!</p>${m.source ? `<p class="sub" style="font-size:16px">from ${esc(m.source)}</p>` : ''}`,
+  read: m => `<h2>Here's what it says</h2><div class="reading">${esc(m.text)}</div>`,
+  identify: m => `<div class="center">${m.frame ? `<figure class="polaroid"><img src="${esc(asset(m.frame))}" alt="What Teddy sees"></figure>` : ''}<h2>That's ${esc(m.thing)}!</h2></div>`,
+  badge: m => `<div class="center">
+      <svg class="medal spark" viewBox="0 0 220 240" aria-hidden="true"><g filter="url(#crayon)"><path d="M70 150 l-20 80 30 -18 20 22 16 -80 M150 150 l20 80 -30 -18 -20 22 -16 -80" fill="#cde2f4" stroke="#5b3a22" stroke-width="4" stroke-linejoin="round"/>
+        <circle cx="110" cy="100" r="84" fill="#ffe6a0" stroke="#5b3a22" stroke-width="5"/><circle cx="110" cy="100" r="66" fill="none" stroke="#5b3a22" stroke-width="3" stroke-dasharray="6 7"/></g>
+        <svg x="70" y="60" width="80" height="80" class="ico"><use href="#i-${esc(m.icon || 'star')}"/></svg></svg>
+      <h2>${esc(m.badge)}</h2>
+      ${m.status === 'ready' ? `<img class="qr" src="${esc(m.qr)}" alt="QR code for your badge on Solana"><p class="sub">Your badge is on the blockchain! Scan it with a grown-up.</p>`
+        : m.status === 'minting' ? '<p class="sub">Making your badge…</p>' : '<p class="sub">Badge saved! Great job.</p>'}</div>`,
+  mood: m => `<div class="center"><h2>${esc(m.caption || 'How are you feeling?')}</h2></div>`,
+  answer: m => `<p class="sub">${esc(m.question || '')}</p><div class="reading" style="font-size:32px">${esc(m.text)}</div>`,
+};
+const ICONS = { keys: 'keys', shoes: 'shoes', shoe: 'shoes', backpack: 'backpack', bunny: 'bunny', remote: 'remote' };
+let GUIDES = [];
+
+/* number pad for homework answers */
+function wirePad() {
+  let v = '';
+  const show = () => { const t = $('#typed'); if (t) t.textContent = v; };
+  page.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.k; navigator.vibrate?.(15);
+    if (k === 'back') v = v.slice(0, -1); else if (k === 'go') { if (v) { tell(v); v = ''; } } else if (v.length < 6) v += k;
+    show();
+  }));
+}
+
+/* ---------- full-screen: breathing + CPR ---------- */
+function openOverlay(id) { $('#' + id).classList.add('on'); }
+function closeOverlay(id) { $('#' + id).classList.remove('on'); }
+let countTimer = null, audioCtx = null;
+function renderCPR(m, prev) {
+  const c = m.cards[m.card] || {}; const first = m.card === 0;
+  $('#cpr').innerHTML = m.counting
+    ? `<div class="count" id="count" style="--beat:${60 / (m.bpm || 110)}s" aria-live="off">1</div>
+       <div class="cprcard"><h2>Push hard and fast</h2><p>Push with Teddy's arms. Keep going until help comes.</p></div>
+       <div class="row"><a class="call" href="tel:911">Call 911</a><button class="big c-sheet" type="button" onclick="act('stop')">Stop</button></div>
+       ${m.source ? `<p class="src">Steps from the ${esc(m.source)}</p>` : ''}`
+    : `<div class="cprcard ${first ? 'first' : ''}"><p class="sub">Step ${m.card + 1} of ${m.cards.length}</p><h2>${esc(c.show)}</h2><p>${esc(c.say)}</p></div>
+       <div class="row">${first ? '<a class="call" href="tel:911">Call 911</a>' : ''}<button class="big c-sheet" type="button" onclick="act('stop')">Stop</button></div>
+       ${m.source ? `<p class="src">Steps from the ${esc(m.source)}</p>` : ''}`;
+  openOverlay('cpr');
+  if (m.counting && !countTimer) startCount(m.bpm || 110); else if (!m.counting) stopCount();
+}
+function startCount(bpm) {
+  let n = 0; const ms = 60000 / bpm;
+  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  countTimer = setInterval(() => {
+    n = n % 30 + 1; const el = $('#count'); if (!el) return;
+    el.textContent = n; el.classList.remove('beat'); void el.offsetWidth; el.classList.add('beat');
+    if (audioCtx) { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = n === 1 ? 880 : 660;
+      g.gain.setValueAtTime(.25, audioCtx.currentTime); g.gain.exponentialRampToValueAtTime(.001, audioCtx.currentTime + .08);
+      o.connect(g).connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + .09); }
+    if (speaker && !talking) { try { const u = new SpeechSynthesisUtterance(String(n)); u.rate = 1.9; speechSynthesis.cancel(); speechSynthesis.speak(u); } catch {} }
+  }, ms);
+}
+function stopCount() { clearInterval(countTimer); countTimer = null; }
+
+/* ---------- live link to the Mac ---------- */
 function handle(m) {
   if (m.type === 'say') onSay(m);
   else if (m.type === 'hush') hush();
   else if (m.type === 'screen') render(m);
-  else if (m.type === 'listening') { listening = m.on; setPill(); }
-  else if (m.type === 'event') addEvent(m);
+  else if (m.type === 'listening') { listening = m.on; refreshFace(); }
+  else if (m.type === 'breathe') { m.on ? openOverlay('breathe') : closeOverlay('breathe'); }
 }
-const online = on => { $('#pill').classList.toggle('off', !on); if (on) setPill(); else $('#pillText').textContent = 'Reconnecting…'; };
+function status(text, cls = '') { const s = $('#status'); s.className = 'status ' + cls; $('#statusText').textContent = text; }
+let es = null;
 function connect() {
-  es?.close();
   let got = false;
   es = new EventSource(TEDDY.url('/api/stream' + (speaker ? '?speaker=1' : '')));
-  es.onopen = () => online(true);
-  es.onerror = () => online(false);
+  es.onopen = () => status(speaker ? 'Teddy is here' : 'Watching');
+  es.onerror = () => status('Reconnecting…', 'off');
   es.onmessage = e => { got = true; handle(JSON.parse(e.data)); };
-  // Cloudflare quick tunnels hold event-streams back; if nothing arrives quickly, poll instead.
-  setTimeout(() => { if (!got) { es.close(); es = null; pollLoop(); } }, 4000);
+  setTimeout(() => { if (!got) { es.close(); pollLoop(); } }, 4000);  // tunnels can buffer event-streams
 }
 const CID = Math.random().toString(36).slice(2);
 async function pollLoop() {
   let after = -1;
   for (;;) {
     try {
-      const r = await fetch(TEDDY.url(`/api/poll?after=${after}&speaker=${speaker ? 1 : 0}&cid=${CID}`), { cache: 'no-store' });
-      const j = await r.json(); online(true);
-      after = j.seq; j.msgs.forEach(handle);
-    } catch { online(false); await new Promise(r => setTimeout(r, 2000)); }
+      const j = await (await fetch(TEDDY.url(`/api/poll?after=${after}&speaker=${speaker ? 1 : 0}&cid=${CID}`), { cache: 'no-store' })).json();
+      status(speaker ? 'Teddy is here' : 'Watching'); after = j.seq; j.msgs.forEach(handle);
+    } catch { status('Reconnecting…', 'off'); await new Promise(r => setTimeout(r, 2000)); }
   }
 }
-let listening = false;
-function setPill() {
-  const p = $('#pill'); p.classList.toggle('listening', listening && !talking); p.classList.toggle('speaking', talking);
-  if (DEMO) { $('#pill').classList.toggle('speaking', talking); return; }
-  $('#pillText').textContent = talking ? 'Teddy is talking' : listening ? 'Listening…' : (speaker ? 'Ready' : 'Remote');
-}
-function showSubs(t) { const s = $('#subs'); s.innerHTML = '<b>Teddy:</b> ' + esc(t); s.classList.add('on'); }
-function hideSubs() { $('#subs').classList.remove('on'); }
-function announce(t) { $('#announce').textContent = t; }
 
-/* ---------------- the stage ---------------- */
-const MOODFACE = { 5: '😄', 4: '🙂', 3: '😐', 2: '😟', 1: '😢' };
-function render(m) {
-  const prev = S; S = m;
-  const sc = $('#scene'); $('#stage').className = 'stage' + (m.mode === 'cpr' ? ' cpr-stage' : '');
-  clearTimeout(idleTimer);
-  if (!['idle', 'story', 'homework', 'cpr', 'dance'].includes(m.mode)) idleTimer = setTimeout(() => render({ mode: 'idle' }), 120000);
-  const stop = '<button class="stopbig" type="button" onclick="act(\'stop\')">✋ Stop</button>';
-  switch (m.mode) {
-    case 'think':
-      sc.innerHTML = `<div class="bigbear" aria-hidden="true">🧸</div><div class="caption"><span>${esc(m.caption || 'Thinking')}</span><span class="dots"></span></div>`; break;
-    case 'listen':
-      sc.innerHTML = `<div class="bigbear" aria-hidden="true">👂🧸</div><div class="caption">${esc(m.caption || "I'm listening!")}</div>`; break;
-    case 'find': sc.innerHTML = findView(m); break;
-    case 'story': {
-      const p = m.pages[m.page || 0] || m.pages[0];
-      if (prev.mode !== 'story' || prev.title !== m.title) announce('Story: ' + m.title);
-      sc.innerHTML = `<div class="story sc-${esc(p.scene)}">
-          <h2>${esc(m.title)}</h2>
-          <div class="art" aria-hidden="true">${esc(p.art)}</div>
-          <div class="page">${esc(p.text)}</div>
-          <div class="pager" aria-label="Page ${(m.page || 0) + 1} of ${m.pages.length}">${m.pages.map((_, i) => `<i class="${i === (m.page || 0) ? 'on' : ''}"></i>`).join('')}</div>
-          ${m.done ? '<div class="caption">🌟 The End 🌟</div>' : stop}
-        </div>`; break;
-    }
-    case 'homework': {
-      const cur = m.step || 0;
-      sc.innerHTML = `<div class="hw"><p class="q">${esc(m.question)}</p><ol>${m.steps.map((s, i) =>
-        `<li class="${i === cur && !m.done ? 'cur' : i < cur || m.done ? 'done' : ''}" ${i > cur && !m.done ? 'hidden' : ''}>
-           <div class="math">${esc(s.show)}</div><div class="say">${esc(s.say)}</div></li>`).join('')}</ol></div>
-        ${m.done ? `<div class="answer" aria-label="Answer ${esc(m.answer)}">= ${esc(m.answer)} 🎉</div>` : stop}`;
-      if (m.steps[cur]) announce(m.steps[cur].show); break;
-    }
-    case 'cpr':
-      sc.innerHTML = `<div class="heart" style="--beat:${60 / (m.bpm || 110)}s" aria-hidden="true">❤️</div>
-        <div class="push" style="--beat:${60 / (m.bpm || 110)}s">PUSH</div>
-        <div class="caption">${esc(m.caption || 'Push hard and fast')}${m.round ? ` · round ${m.round}` : ''}</div>
-        <div class="choices"><a class="call" href="tel:911">📞 Call 911</a>${stop}</div>`;
-      if (prev.mode !== 'cpr') announce('CPR mode. Call 911. Push hard and fast in the middle of the chest.'); break;
-    case 'dance':
-      sc.innerHTML = `<div class="dance" aria-hidden="true"><span>🎵</span><span>🧸</span><span>🎶</span></div><div class="caption">Dance party!</div>${stop}`; break;
-    case 'read':
-      sc.innerHTML = `${m.frame ? `<div class="shot" style="max-width:420px"><img src="${esc(asset(m.frame))}" alt="What Teddy is reading"></div>` : ''}
-        <div class="card">${esc(m.text)}</div>`; break;
-    case 'identify':
-      sc.innerHTML = `${m.frame ? `<div class="shot"><img src="${esc(asset(m.frame))}" alt="What Teddy sees"></div>` : '<div class="bigbear" aria-hidden="true">👀</div>'}
-        <div class="caption">That's ${esc(m.thing)}!</div>`; announce("That's " + m.thing); break;
-    case 'answer':
-      sc.innerHTML = `<div class="caption" style="font-size:24px;color:var(--muted)">${esc(m.question || m.title)}</div>
-        <div class="card ${m.urgent ? 'urgent' : ''}">${esc(m.text)}${m.source ? `<small>📄 From: ${esc(m.source)}</small>` : ''}</div>
-        ${m.urgent ? '<a class="call" href="tel:911">📞 Call 911</a>' : ''}`; break;
-    case 'check': {
-      const bad = ['fallen', 'alert'].includes(m.status), ok = m.status === 'ok';
-      sc.innerHTML = `<div class="bigbear" aria-hidden="true">${ok ? '🥰' : bad ? '🆘' : '💛'}</div>
-        <div class="caption ${ok ? 'status-ok' : bad ? 'status-bad' : ''}">${esc(m.caption)}</div>
-        ${ok || m.status === 'alert' ? '' : `<div class="choices">
-          <button type="button" onclick="tell('Yes, I\\'m okay')">👍 I'm okay</button>
-          <button type="button" class="help" onclick="tell('No, I need help')">🆘 I need help</button></div>`}
-        ${bad ? '<a class="call" href="tel:911">📞 Call 911</a>' : ''}`; break;
-    }
-    case 'mood':
-      sc.innerHTML = m.score ? `<div class="bigbear" aria-hidden="true">${MOODFACE[m.score] || '🙂'}</div><div class="caption">${esc(m.mood || '')}</div>`
-        : `<div class="bigbear" aria-hidden="true">🧸</div><div class="caption">${esc(m.caption)}</div>
-           <div class="choices">
-             <button type="button" onclick="tell('I feel great today')">😄 Great</button>
-             <button type="button" onclick="tell('I feel okay')">🙂 Okay</button>
-             <button type="button" onclick="tell('I feel sad')">😢 Sad</button>
-             <button type="button" onclick="tell('I feel lonely')">🥺 Lonely</button></div>`; break;
-    default:
-      sc.innerHTML = `<div class="bigbear" aria-hidden="true">🧸${m.wave ? '<span class="wave">👋</span>' : ''}</div>
-        <div class="hello">Hi! Tap a button, or just talk to me.</div>`;
+/* ---------- buttons ---------- */
+document.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+  navigator.vibrate?.(25);
+  const g = b.dataset.go;
+  if (g === 'find') render({ mode: 'find_menu', face: 'listening' });
+  else if (g === 'howto') render({ mode: 'howto_menu', face: 'happy', guides: GUIDES });
+  else act(g);
+}));
+
+/* ---------- wake up ---------- */
+function wake(asSpeaker) {
+  speaker = asSpeaker;
+  if (asSpeaker) {
+    audio.src = SILENT; audio.play().catch(() => {});
+    try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch {}
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); } catch {}
+    navigator.wakeLock?.request('screen').catch(() => {});
   }
-  if (m.caption && !['story', 'homework', 'cpr'].includes(m.mode)) announce(m.caption);
+  document.body.classList.add('awake'); connect();
 }
-
-function findView(m) {
-  const badge = { found: ['found', '✅ Found it!'], last_seen: ['seen', '🕒 Last seen ' + (m.when || '')],
-                  not_found: ['none', '🔍 Not seen yet'], looking: ['none', '🔍 Looking…'] }[m.status] || ['none', ''];
-  let shot = '';
-  if (m.frame) {
-    let box = '';
-    if (m.box && m.box.x != null) {
-      const w = m.box.w || 0.14, h = m.box.h || 0.14;
-      box = `<div class="box" style="left:${(m.box.x - w / 2) * 100}%;top:${(m.box.y - h / 2) * 100}%;width:${w * 100}%;height:${h * 100}%"></div>`;
-    }
-    shot = `<div class="shot"><img src="${esc(asset(m.frame))}" alt="Camera picture with your ${esc(m.object)} marked">${box}</div>`;
-  } else if (m.status !== 'looking') shot = '<div class="bigbear" aria-hidden="true">🔍</div>';
-  else shot = '<div class="bigbear" aria-hidden="true">🧸</div>';
-  return `<span class="badge ${badge[0]}">${esc(badge[1])}</span>${shot}<div class="caption">${esc(m.caption || '')}</div>`;
-}
-
-/* ---------------- feed ---------------- */
-const seen = new Set();
-function addEvent(e) {
-  if (seen.has(e.id)) return; seen.add(e.id);
-  const d = e.data || {}, li = document.createElement('li');
-  const who = (n, t) => { li.innerHTML = '<span class="who"></span> <span></span>'; li.children[0].textContent = n + ':'; li.children[1].textContent = t; };
-  if (e.kind === 'speak') who('Teddy', d.reply);
-  else if (e.kind === 'heard') { li.className = 'you'; who('You', d.text); }
-  else if (e.kind === 'alert') { li.className = 'alert'; li.textContent = '⚠ ' + (d.status || '').replace(/_/g, ' ') + (d.text ? ' — ' + d.text : ''); }
-  else if (e.kind === 'gesture') { li.className = 'meta'; li.textContent = { wave: '👋 You waved', point: '👉 You pointed', come_here: '🫴 Come here', thumbs_up: '👍 Thumbs up' }[d.type] || d.type; }
-  else if (e.kind === 'ask' && d.source) { li.className = 'meta'; li.textContent = '📄 Answer from ' + d.source; }
-  else return;
-  const f = $('#feed'); f.append(li); while (f.children.length > 50) f.firstChild.remove(); f.scrollTop = f.scrollHeight;
-}
-
-/* ---------------- controls ---------------- */
-document.querySelectorAll('[data-intent]').forEach(b => b.addEventListener('click', () => act(b.dataset.intent)));
-const dlg = $('#findDlg');
-$('#findBtn').addEventListener('click', () => dlg.showModal());
-$('#findClose').addEventListener('click', () => dlg.close());
-document.querySelectorAll('[data-find]').forEach(b => b.addEventListener('click', () => { act('find_object', { object: b.dataset.find }); dlg.close(); }));
-$('#findOther').addEventListener('submit', e => { e.preventDefault(); const v = $('#findText').value.trim();
-  if (v) { act('find_object', { object: v }); $('#findText').value = ''; dlg.close(); } });
-$('#talk').addEventListener('submit', e => { e.preventDefault(); const v = $('#talkText').value.trim(); if (v) { tell(v); $('#talkText').value = ''; } });
-$('#wakeBtn').addEventListener('click', () => wake(true));
-$('#remoteBtn').addEventListener('click', () => wake(false));
-$('#demoBtn').addEventListener('click', () => startDemo());
-$('#retryBtn').addEventListener('click', () => boot());
-$('#addrForm').addEventListener('submit', e => { e.preventDefault(); const v = $('#addr').value.trim(); if (v) { TEDDY.remember(v); boot(); } });
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SR) {
-  const mic = $('#mic'); mic.hidden = false;
-  mic.addEventListener('click', () => { const r = new SR(); r.lang = 'en-US'; r.onresult = ev => tell(ev.results[0][0].transcript); r.start(); });
-}
-render({ mode: 'idle' });
-
 async function boot() {
-  $('#wake').classList.add('checking'); $('#checking').hidden = false; $('#sleepBox').hidden = true;
+  setFace('sleeping'); $('#checking').hidden = false; $('#awakeBox').hidden = $('#sleepBox').hidden = true;
   const base = await TEDDY.connect();
-  $('#checking').hidden = true; $('#wake').classList.remove('checking');
-  document.querySelectorAll('a[data-link]').forEach(a => a.href = TEDDY.link(a.getAttribute('href')));
-  if (base !== null) { $('#awakeBox').hidden = false; $('#wakeBtn').focus(); return; }
-  $('#awakeBox').hidden = true; $('#sleepBox').hidden = false; $('#wakeBear').textContent = '😴';
-  $('#demoBtn').focus();
-  watchForWake();
-}
-function watchForWake() {  // while asleep/demo, notice when the Mac comes back
+  $('#checking').hidden = true;
+  try { GUIDES = await (await fetch(base !== null ? TEDDY.url('/api/howto/menu') : '/demo/guides-menu.json')).json(); } catch { GUIDES = []; }
+  if (base !== null) { setFace('happy'); $('#awakeBox').hidden = false; $('#wakeBtn').focus(); return; }
+  $('#sleepBox').hidden = false; $('#demoBtn').focus();
   const t = setInterval(async () => { if (await TEDDY.connect() !== null) { clearInterval(t); $('#woke').hidden = false; } }, 20000);
 }
-function startDemo() {
+$('#wakeBtn').addEventListener('click', () => wake(true));
+$('#remoteBtn').addEventListener('click', () => wake(false));
+$('#retryBtn').addEventListener('click', boot);
+$('#demoBtn').addEventListener('click', () => {
   DEMO = true; speaker = true;
   try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch {}
-  document.body.classList.add('awake');
-  $('#pill').classList.remove('off'); $('#pillText').innerHTML = '<span class="demo-flag">DEMO</span> Teddy is sleeping';
-  render({ mode: 'idle' });
-  Demo.say("Hi! I'm Teddy. My computer is asleep, so this is a pretend demo. Tap a button to see what I can do!");
-}
+  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  document.body.classList.add('awake'); status('Demo · Teddy is sleeping', 'demo'); render({ mode: 'idle' });
+  Demo.say("Hi! My computer is asleep, so this is a pretend demo. Tap a button!");
+});
+$('#addrForm').addEventListener('submit', e => { e.preventDefault(); const v = $('#addr').value.trim(); if (v) { TEDDY.remember(v); boot(); } });
+render({ mode: 'idle' });
 boot();
 </script>
 <script src="/demo/demo.js"></script>

@@ -1,0 +1,42 @@
+[
+ {
+  "id": "tie-shoes",
+  "title": "Tie your shoes",
+  "icon": "shoe"
+ },
+ {
+  "id": "brush-teeth",
+  "title": "Brush your teeth",
+  "icon": "tooth"
+ },
+ {
+  "id": "draw-cat",
+  "title": "Draw a cat",
+  "icon": "cat"
+ },
+ {
+  "id": "pack-backpack",
+  "title": "Pack your backpack",
+  "icon": "backpack"
+ },
+ {
+  "id": "wash-hands",
+  "title": "Wash your hands",
+  "icon": "hands"
+ },
+ {
+  "id": "make-bed",
+  "title": "Make your bed",
+  "icon": "bed"
+ },
+ {
+  "id": "rock-paper-scissors",
+  "title": "Play Rock Paper Scissors",
+  "icon": "hand"
+ },
+ {
+  "id": "i-spy",
+  "title": "Play I Spy",
+  "icon": "eye"
+ }
+]

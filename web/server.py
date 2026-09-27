@@ -272,6 +272,7 @@ class Action(BaseModel):
     intent: str
     object: str | None = None
     question: str | None = None
+    guide_id: str | None = None
 
 
 class Text(BaseModel):
@@ -293,7 +294,7 @@ class Question(BaseModel):
 def action(a: Action):
     if a.intent not in INTENTS:
         raise HTTPException(400, f"unknown intent {a.intent}")
-    args = {k: v for k, v in {"object": a.object, "question": a.question}.items() if v}
+    args = {k: v for k, v in {"object": a.object, "question": a.question, "guide_id": a.guide_id}.items() if v}
     _bear().submit(a.intent, "phone", **args)
     return {"ok": True, "intent": a.intent}
 
@@ -307,6 +308,12 @@ def say(t: Text):
 def gesture(g: Gesture):
     """Lets the demo fake a camera gesture from the screen."""
     return _bear().on_gesture(g.model_dump(), "phone") or {"ignored": True}
+
+
+@app.get("/api/howto/menu")
+def howto_menu():
+    from brain import howto
+    return howto.menu()
 
 
 @app.get("/api/state")

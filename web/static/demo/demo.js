@@ -1,118 +1,88 @@
-/* "Teddy is sleeping" demo: plays the same screens the real bear sends, spoken by the browser.
-   Used only when the Mac's brain can't be reached. Every line here mirrors what brain/agent.py says. */
+/* "Teddy is sleeping" demo: the same screens the real bear sends, played in the browser.
+   Mirrors brain/agent.py: find, how-to coach (waits for Done), homework tutor (never gives the answer), read, badge. */
 window.Demo = (() => {
-  let run = 0;  // bumping this cancels whatever scene is playing
-  const wait = ms => new Promise(r => setTimeout(r, ms));
-  const say = text => new Promise(resolve => {
-    onSay({ id: 'demo', text, resolve });
-    addEvent({ id: 'd' + Math.random(), kind: 'speak', data: { reply: text } });
-  });
+  let run = 0, waiter = null, guides = null;
+  const say = (text, mood) => new Promise(resolve => onSay({ id: 'demo', text, mood, resolve }));
   const show = m => render({ type: 'screen', ...m });
+  const answer = () => new Promise(r => { waiter = r; });            // next tap/typed answer
+  const load = async () => guides || (guides = await (await fetch('/demo/guides.json')).json());
 
-  const STORY = { title: 'Teddy and the Sleepy Moon', pages: [
-    { text: 'Once upon a time, a little teddy bear looked up and saw the moon yawning.', art: '🧸🌙😴', scene: 'night' },
-    { text: "Why are you so sleepy, Moon? asked Teddy. I've been shining all night, said the Moon.", art: '🌙✨⭐', scene: 'night' },
-    { text: 'So Teddy hummed a soft song, and all the stars twinkled along.', art: '🧸🎵⭐⭐', scene: 'space' },
-    { text: 'The Moon smiled and closed its eyes, and the Sun peeked up to say good morning.', art: '🌙😊🌅', scene: 'sunset' },
-    { text: 'And Teddy curled up for a cozy nap, happy that he helped a friend.', art: '🧸💤💛', scene: 'meadow' },
-  ] };
-  const STEPS = [
-    { show: '7 × 8', say: "Let's find 7 times 8. That means 7 groups of 8." },
-    { show: '7 × 8 = 8 + 8 + 8 + 8 + 8 + 8 + 8', say: 'We can add eight, seven times.' },
-    { show: '8 + 8 = 16 → 24 → 32 → 40 → 48 → 56', say: 'Counting up by eights: 16, 24, 32, 40, 48, 56.' },
-    { show: '7 × 8 = 56', say: 'So 7 times 8 is 56!' },
-  ];
-
-  const SCENES = {
-    async find_object(r) {
-      show({ mode: 'find', object: 'remote', status: 'looking', caption: 'Looking for your remote…' });
-      await say("Let me look for your remote!"); if (r !== run) return;
-      show({ mode: 'find', object: 'remote', status: 'found', frame: '/demo/find-remote.jpg', when: 'just now',
-             caption: 'Your remote is on the left!' });
-      await say('Your remote is on the left! I raised my arm to point right at it.');
-    },
-    async story(r) {
-      show({ mode: 'think', caption: 'Thinking of a story…' });
-      await say('Ooh, a story! Let me think of a good one.');
-      for (let i = 0; i < STORY.pages.length; i++) {
-        if (r !== run) return;
-        show({ mode: 'story', ...STORY, page: i });
-        await say(STORY.pages[i].text);
-      }
-      if (r !== run) return;
-      show({ mode: 'story', ...STORY, page: STORY.pages.length - 1, done: true });
-      await say('The end! Did you like it?');
-    },
-    async homework(r) {
-      show({ mode: 'think', caption: 'Let me work it out…' });
-      await say("Let's work it out together!");
-      for (let i = 0; i < STEPS.length; i++) {
-        if (r !== run) return;
-        show({ mode: 'homework', question: 'What is 7 times 8?', steps: STEPS, step: i, answer: '56' });
-        await say(STEPS[i].say);
-      }
-      if (r !== run) return;
-      show({ mode: 'homework', question: 'What is 7 times 8?', steps: STEPS, step: STEPS.length - 1, answer: '56', done: true });
-      await say("You're so smart! Want to try another one?");
-    },
-    async read() {
-      show({ mode: 'think', caption: 'Hold it up for me…' });
-      await say("Hold it up for me, I'll read it.");
-      const text = "Dear Rose, happy birthday! We love you and we'll visit on Sunday. Love, Maya.";
-      show({ mode: 'read', text });
-      await say(text);
-    },
-    async dance(r) {
-      show({ mode: 'dance' });
-      await say("Dance party! Let's go!"); await wait(4000); if (r !== run) return;
-      await say('Whew! That was fun!'); show({ mode: 'idle' });
-    },
-    async cpr_coach(r) {
-      show({ mode: 'cpr', bpm: 110, caption: 'Call 911 now' });
-      await say('Call 911 now, and put them on speaker. Put the heel of your hand in the middle of their chest. Push hard and fast with my arms.');
-      if (r !== run) return;
-      show({ mode: 'cpr', bpm: 110, round: 1, caption: 'Push hard and fast' });
-      await say("In real life I keep the beat with my arms until help arrives. Tap Stop when you're done.");
-    },
-    async fall_check() {
-      show({ mode: 'check', status: 'checking', caption: 'Are you okay?' });
-      await say("I'm checking on you. Are you feeling okay? You can tap a button to answer me.");
-    },
-    async mood_checkin() {
-      show({ mode: 'mood', caption: 'How are you feeling today?' });
-      await say('How are you feeling today?');
-    },
-    async identify() {
-      show({ mode: 'identify', thing: 'a red toy car' });
-      await say("Ooh! I think that's a red toy car.");
-    },
-    async stop() { hush(); show({ mode: 'idle' }); await say('Okay, stopping.'); },
-  };
-
-  function play(intent) {
-    run++; hush();
-    return (SCENES[intent] || SCENES.identify)(run);
+  async function find(r, obj = 'remote') {
+    show({ mode: 'find', object: obj, status: 'looking', face: 'thinking' });
+    await say(`Let me look for your ${obj}!`); if (r !== run) return;
+    show({ mode: 'find', object: obj, status: 'found', frame: '/demo/find-remote.jpg', when: 'just now', face: 'happy',
+           caption: `Your ${obj} is on the left!` });
+    await say(obj === 'remote' ? 'Your remote is on the left! See my arm pointing?' : `In the demo I can only find the remote, but on the real bear I'd look for your ${obj}!`);
   }
 
+  async function howto(r, id = 'tie-shoes') {
+    const g = (await load()).find(x => x.id === id) || guides[0];
+    const card = { guide: g, steps: g.steps.map(s => ({ show: s.show, draw: s.draw || '' })), total: g.steps.length };
+    await say(`Ooh, let's ${g.title.toLowerCase()}! Tap Done when you finish each step.`, 'happy');
+    for (let i = 0; i < g.steps.length; i++) {
+      if (r !== run) return;
+      show({ mode: 'howto', step: i, face: 'talking', ...card });
+      await say(g.steps[i].say);
+      for (;;) {
+        if (r !== run) return;
+        show({ mode: 'howto', step: i, face: 'listening', waiting: true, ...card });
+        const a = (await answer()).toLowerCase(); if (r !== run) return;
+        if (/done|next|yes|ok/.test(a)) { if (i < g.steps.length - 1) await say(['Ooh nice!', 'You got it!', 'Look at you go!'][i % 3], 'happy'); break; }
+        if (/help/.test(a)) await say(g.steps[i].tip || 'You got this!');
+        else await say(g.steps[i].say);
+      }
+    }
+    if (r !== run) return;
+    show({ mode: 'badge', badge: g.badge, icon: g.icon, status: 'saved', face: 'happy' });
+    await say(`You did it! You earned the ${g.badge} badge! On the real bear it goes on the Solana blockchain.`, 'happy');
+  }
+
+  async function homework(r) {
+    const steps = [{ show: '5 × 8 = ?', ask: "7 times 8 is 7 groups of 8. First, what's 5 times 8?", hint: 'Count by 8s five times!', v: '40' },
+                   { show: '2 × 8 = ?', ask: "Now the other 2 groups. What's 2 times 8?", hint: 'Count by 8s, two times.', v: '16' },
+                   { show: '40 + 16 = ?', ask: "Put them together! What's 40 plus 16?", hint: 'Start at 40 and add 16.', v: '56' }];
+    const solved = [], base = { question: 'What is 7 times 8?', problem: '7 × 8', steps: steps.map(s => ({ show: s.show })) };
+    await say("Ooh, let's figure it out together!");
+    for (let i = 0; i < steps.length; i++) {
+      if (r !== run) return;
+      show({ mode: 'homework', step: i, solved, face: 'talking', ...base });
+      await say(steps[i].ask);
+      for (let tries = 0; ; tries++) {
+        if (r !== run) return;
+        const a = await answer(); if (r !== run) return;
+        if (/help|hint/i.test(a)) { await say(steps[i].hint); tries--; continue; }
+        if (a.replace(/\D/g, '') === steps[i].v) { solved.push({ i, value: steps[i].v }); show({ mode: 'homework', step: i, solved, face: 'happy', ...base });
+          if (i < steps.length - 1) await say('Yes! Ooh nice.', 'happy'); break; }
+        await say(tries === 0 ? `Hmm, not quite! ${steps[i].hint}` : 'So close! Try counting it out slowly.');
+      }
+    }
+    if (r !== run) return;
+    show({ mode: 'homework', step: 2, solved, done: true, face: 'happy', ...base });
+    await say('You figured it out yourself! 7 times 8 is 56. Nice work!', 'happy');
+  }
+
+  async function read() {
+    const text = 'The elephant was very hungry. Let\'s sound out the tricky words. e-le-phant. Elephant!';
+    show({ mode: 'think', caption: 'Hold it up for me…', face: 'thinking' });
+    await say("Hold it up for me, I'll read it.");
+    show({ mode: 'read', text, face: 'talking' });
+    await say(text, 'reading');
+  }
+
+  const SCENES = { find_object: (r, x) => find(r, x.object), howto: (r, x) => howto(r, x.guide_id), homework, read,
+                   stop: async () => { hush(); show({ mode: 'idle' }); await say('Okay! We can do it later.'); } };
+
+  function play(intent, extra = {}) {
+    run++; waiter = null; hush();
+    return (SCENES[intent] || (async () => say("In the demo I can find things, teach how-tos, help with homework, and read!")))(run, extra);
+  }
   function tell(text) {
+    if (waiter) { const w = waiter; waiter = null; w(text); return; }
     const t = text.toLowerCase();
-    addEvent({ id: 'd' + Math.random(), kind: 'heard', data: { text } });
-    if (/okay|fine|good|great|yes/.test(t) && ['check', 'mood'].includes(S.mode)) {
-      run++; hush();
-      show({ mode: 'check', status: 'ok', caption: "Glad you're okay!" });
-      return say("Phew! I'm glad you're okay. I'm right here if you need me.");
-    }
-    if (/sad|lonely|help/.test(t)) {
-      run++; hush();
-      return say("I'm here with you. In real life I'd let your family know, and they'd see it on their dashboard.");
-    }
     if (/\d|times|plus|homework/.test(t)) return play('homework');
-    if (/story/.test(t)) return play('story');
-    if (/find|where/.test(t)) return play('find_object');
-    if (/danc/.test(t)) return play('dance');
-    run++; hush();
-    return say("I'm sleeping right now, so I can only do pretend demos. Try asking for a story, or what 7 times 8 is!");
+    if (/how|teach|show/.test(t)) return play('howto', {});
+    if (/find|where|lost/.test(t)) return play('find_object', { object: 'remote' });
+    return play('none');
   }
-
   return { play, tell, say };
 })();
