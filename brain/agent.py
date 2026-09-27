@@ -20,7 +20,7 @@ import time
 from collections import deque
 from fractions import Fraction
 
-from brain import activity, badges, flags, howto, mood, screen, tutor
+from brain import activity, badges, cpr, flags, howto, mood, screen, tutor
 from brain import snowflake as sf
 from brain.mocks import MockBody, MockVision, MockVoice
 
@@ -204,7 +204,12 @@ class Teddy:
         self.wake_word = "" if (isinstance(self.mic, MockVoice) or hasattr(self.mic, "wait_for_wake")) else \
             (os.getenv("TEDDY_WAKE", "teddy") if wake_word is None else wake_word)
         if not isinstance(self.vision, MockVision) and hasattr(self.vision, "frame"):
-            sf.set_frame_source(self.vision.frame)
+            def frame():  # ask senses for a face-blurred frame when it can do that
+                try:
+                    return self.vision.frame(blur_faces=True)
+                except TypeError:
+                    return self.vision.frame()
+            sf.set_frame_source(frame)
         self.history = deque(maxlen=8)
         self.status = "idle"
         self.jobs = queue.Queue()
@@ -242,9 +247,10 @@ class Teddy:
             self._last_spoke = time.time()
         return text
 
-    def listen(self, seconds=6):
+    def listen(self, seconds=6, pose=True):
         """Get one answer from the person (routes through the voice loop if it's running)."""
-        self._safe(self.body.pose, "listen")
+        if pose:  # pose=False keeps CPR arms pumping
+            self._pose("listening", "listen")
         screen.publish({"type": "listening", "on": True})
         try:
             if self._voice_loop_on:
@@ -399,18 +405,22 @@ class Teddy:
         hit = self._while_saying(f"Let me look for your {obj}!", self.vision.find, obj)
         if hit:
             x, y, w, h = hit["x"], hit["y"], hit.get("w"), hit.get("h")
-            self._safe(self.body.point_at, x, y)  # head turns to look, that side's arm goes up
-            frame = self._keep_frame(hit.get("image"), obj)
+            if hasattr(self.body, "found_it"):  # A's gesture: look there, then that side's arm goes up high
+                self._safe(self.body.found_it, x, y)
+            else:
+                self._safe(self.body.point_at, x, y)
+            frame = self._keep_frame(hit.get("image"), obj, box={"x": x, "y": y, "w": w, "h": h})
             sf.log_sighting(hit.get("label", obj), x, y, frame_path=frame, w=w, h=h)
             near = self._nearby_now(obj, x, y)
             line = f"Your {obj} {they} {_side(x)}" + (f", by the {near}!" if near else "!")
-            screen.show("find", object=obj, status="found", frame=frame and f"/frames/{frame}",
-                        box=None if hit.get("image") else {"x": x, "y": y, "w": w, "h": h},
+            activity.log("find", skill="Finding my stuff", object=obj, found="now", near=near)
+            screen.show("find", object=obj, status="found", frame=frame and f"/frames/{frame}", box=None,
                         when="just now", near=near, caption=line)
             return self.say(line, mood="happy")
         seen = sf.last_seen(obj)
         if seen:
             self._safe(self.body.look_at, seen["x"], seen["y"])
+            activity.log("find", skill="Finding my stuff", object=obj, found="memory", near=seen.get("near"))
             place = f"by the {seen['near']}" if seen.get("near") else seen["where"]
             line = f"I don't see your {obj} right now, but I last saw {it} {seen['when']}, {place}."
             screen.show("find", object=obj, status="last_seen",
@@ -421,18 +431,13 @@ class Teddy:
         screen.show("find", object=obj, status="not_found", caption=f"I haven't seen your {obj} yet.")
         return self.say(f"Hmm, I haven't seen your {obj} yet. Can you show me around the room?", pose="sad")
 
-    def _keep_frame(self, image_path, tag):
-        """Copy senses' boxed snapshot into data/frames (it's overwritten every find) -> file name."""
+    def _keep_frame(self, image_path, tag, box=None):
+        """Keep a private copy of the find photo: cropped around the object, faces pixelated. -> file name."""
+        img = None
         if image_path and os.path.exists(image_path):
-            name = f"{time.strftime('%Y%m%d_%H%M%S')}_{re.sub(r'[^a-z0-9]+', '-', tag)[:24]}_found.jpg"
-            try:
-                sf.FRAMES_DIR.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(image_path, sf.FRAMES_DIR / name)
-                sf._q.put((sf.backend().upload_frame, sf.FRAMES_DIR / name))
-                return name
-            except OSError as e:
-                print(f"[teddy] keep frame failed: {e}")
-        return sf.save_frame(tag=tag, upload=True)
+            import cv2
+            img = cv2.imread(image_path)  # senses' snapshot already has the object boxed
+        return sf.save_frame(img, tag=f"{tag}-found", upload=True, box=box)
 
     def _nearby_now(self, obj, x, y):
         """Closest other thing in view right now ('laptop'), for 'by the laptop'."""
@@ -698,25 +703,31 @@ class Teddy:
         return self.say(ans, mood="calm")
 
     def do_cpr_coach(self, **_):
-        sf.log_event("alert", {"status": "cpr_started", "text": "CPR coach started"})
-        self._safe(self.body.pose, "alert")
-        screen.show("cpr", bpm=110, round=0, caption="Call 911 now")
-        self.say("Call 911 now, and put them on speaker. Kneel beside them. Put the heel of your hand in the "
-                 "middle of their chest, other hand on top. Push hard and fast with my arms. Ready? Go!",
-                 mood="calm")
-        for i in range(10):  # up to ~5 minutes, until someone says stop or help arrives
+        """Voice-only immersive CPR: AHA cards full-screen, arms pumping at 110/min, a big count. "stop" exits."""
+        self._cpr_active = True
+        sf.log_event("alert", {"status": "cpr_started", "text": "CPR mode started by voice"})
+        activity.log("cpr_start", helping_with=activity.current())
+        steps, source = cpr.cards()
+        deck = dict(cards=[{"show": st["show"], "say": st["say"]} for st in steps], source=source, bpm=110)
+        try:
+            for i, st in enumerate(steps):
+                if self._stop.is_set():
+                    return "stopped"
+                screen.show("cpr", card=i, counting=False, **deck)
+                self.say(st["say"], mood="calm")
             if self._stop.is_set():
-                break
-            screen.update(round=i + 1, caption="Push hard and fast")
-            self._safe(self.body.cpr_beat, 110, 30)  # queued; _body_wait below lets 'stop' cut in
-            self._body_wait(30)
-            if self._stop.is_set():
-                break
-            self.say(random.choice(["You're doing great. Keep pushing, hard and fast.",
-                                    "Keep going! Help is on the way.",
-                                    "Don't stop. Let the chest come all the way up."]), mood="calm")
-        self._safe(self.body.pose, "neutral")
-        return "cpr done"
+                return "stopped"
+            screen.show("cpr", card=len(steps) - 1, counting=True, **deck)
+            self.say("Push hard and fast with my arms. I'll count.", mood="calm")
+            self._safe(self.body.cpr_beat, 110, 600)  # the screen keeps the spoken count on the beat
+            while not self._stop.is_set():
+                reply = self.listen(6, pose=False)
+                if howto.classify_reply(reply) == "stop":
+                    return self.do_stop()
+            return "stopped"
+        finally:
+            self._cpr_active = False
+            activity.log("cpr_end")
 
     def do_fall_check(self, **_):
         self._safe(self.body.pose, "alert")

@@ -363,8 +363,8 @@ def set_frame_source(fn):
     _frame_source = fn
 
 
-def save_frame(img=None, tag="frame", upload=False):
-    """Save a BGR frame to data/frames and (async) to the @FRAMES stage. -> file name or None."""
+def save_frame(img=None, tag="frame", upload=False, box=None):
+    """Save a BGR frame (faces pixelated, optionally cropped to `box`) to data/frames and the @FRAMES stage."""
     if img is None and _frame_source:
         try:
             img = _frame_source()
@@ -374,6 +374,8 @@ def save_frame(img=None, tag="frame", upload=False):
         return None
     try:
         import cv2
+        from brain import privacy
+        img = privacy.safe(img, box)
         FRAMES_DIR.mkdir(parents=True, exist_ok=True)
         name = f"{dt.datetime.now():%Y%m%d_%H%M%S}_{re.sub(r'[^a-z0-9]+', '-', tag.lower())[:24]}.jpg"
         cv2.imwrite(str(FRAMES_DIR / name), img, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -397,9 +399,10 @@ def log_sighting(label, x, y, frame_path=None, w=None, h=None):
     if prev and not frame_path and now - prev["t"] < 5 and abs(prev["x"] - x) < 0.05 and abs(prev["y"] - y) < 0.05:
         return
     if not frame_path:
-        if now - _last_frame["t"] > 10:
+        from brain import privacy
+        if privacy.SIGHTING_FRAMES and now - _last_frame["t"] > 10:  # off by default: room shots can show the kid
             _last_frame.update(t=now, path=save_frame(tag="seen"))
-        frame_path = _last_frame["path"]
+        frame_path = _last_frame["path"] if privacy.SIGHTING_FRAMES else None
     ts = _ts()
     _seen[label] = {"ts": ts, "x": float(x), "y": float(y), "w": w, "h": h, "frame_path": frame_path, "t": now}
     _q.put((backend().insert_sightings, [(ts, label, float(x), float(y), w, h, frame_path)]))
