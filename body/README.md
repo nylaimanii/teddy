@@ -10,7 +10,8 @@ from body.bear import Body
 
 bear = Body()              # auto-finds the Uno; falls back to mock if absent
 bear.pose("listen")        # returns immediately, he keeps moving
-bear.point_at(0.8, 0.4)    # camera coords -> head + the arm on that side
+bear.look_at(0.8, 0.4)     # face a point in the frame he can see RIGHT NOW
+bear.point_at(0.8, 0.4)    # ...and raise the arm on the side it's really on
 bear.dance(10)
 bear.cpr_beat(bpm=110, seconds=30)
 bear.stop()                # cancel and hold
@@ -45,6 +46,13 @@ Notes for whoever's wiring this up:
 - All the tunables are the config block at the top of `bear.py`: `HOME`,
   `LIMITS`, `TRIM` (mechanical zero fudge), `DIRECTION` (flip a sign if a limb
   goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
+- **`look_at`/`point_at` are head-relative, because the camera is on his
+  head.** A frame is an offset from wherever he is already looking, so
+  `(0.5, 0.5)` means "don't move" rather than "return to centre". Turning is
+  `(0.5 - x) x CAMERA_FOV_X` (49.6 deg for the C270), damped by `LOOK_GAIN`.
+  Repeated find->point_at calls converge on the target in about two steps; the
+  old absolute mapping oscillated forever, flipping between the frame edges.
+  Pass `relative=False` for that old behaviour.
 - **Motion is tuned for a bear with stuffing in it.** Durations come from
   `MAX_DEG_PER_SEC` (520, just under the SG90's ~600) via `travel_time()`, so
   every move runs as fast as the horn can actually follow. Gesture sizes come

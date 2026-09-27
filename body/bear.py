@@ -102,6 +102,21 @@ ARMS_ONE_AT_A_TIME = False   # True = left and right arms take turns too
 # (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top. The
 # camera rides in his hat facing the way he faces, so frame-left is his left.
 MIRROR_CAMERA = False   # True if senses/ ever hands us a selfie-mirrored frame
+
+# The camera rides on his HEAD, so a frame is relative to wherever he was
+# already looking -- not to his body. Facing something therefore means turning
+# by however far off-axis it sits in the frame, which is what look_at does by
+# default. Treating frame coords as absolute body angles only works when his
+# head happens to be at home, and makes repeated find->point_at calls swing
+# back and forth: once he faces the thing it sits at x=0.5, which an absolute
+# mapping reads as "return to centre".
+# Logitech C270: 60 deg diagonal on a 4:3 sensor -> 49.6 x 38.2 degrees.
+CAMERA_FOV_X = 49.6
+CAMERA_FOV_Y = 38.2
+LOOK_GAIN = 0.9         # slightly under-turn; overshooting then correcting
+                        # looks worse than creeping up on it
+
+# Only used by look_at(..., relative=False), the old absolute mapping.
 LOOK_PAN = (55, -55)    # offset from neutral at x=0 (his left) and x=1
 LOOK_TILT = (35, -35)   # offset from neutral at y=0 (top, look up) and y=1
 
@@ -459,34 +474,52 @@ class Body:
             print("[bear:mock] pose: %s" % name)
         return self._submit(lambda: gesture(self), interrupt)
 
-    def look_at(self, x, y, duration=0.45, interrupt=True):
-        """Point the head at a spot in the camera frame (x, y in 0..1)."""
-        pan, tilt = self._head_for(x, y)
-        return self._submit(
-            lambda: self._transition({"head_pan": pan, "head_tilt": tilt}, duration),
-            interrupt)
+    def look_at(self, x, y, duration=0.45, interrupt=True, relative=True):
+        """Turn his head to face a spot in the camera frame (x, y in 0..1).
 
-    def point_at(self, x, y, interrupt=True):
-        """Look at it and raise the arm on that side."""
-        x = _clamp(float(x), 0.0, 1.0)
-        pan, tilt = self._head_for(x, y)
-        near = "arm_l" if (x if not MIRROR_CAMERA else 1 - x) < 0.5 else "arm_r"
-        far = "arm_r" if near == "arm_l" else "arm_l"
-        # How far off-centre it is decides how high the arm goes.
-        reach = 45 + 25 * abs(0.5 - x) * 2
-
+        relative=True (the default) treats the frame as what he can see right
+        now, which is what a head-mounted camera actually gives you. Pass
+        relative=False for the old mapping that reads x, y as absolute body
+        angles regardless of where his head is.
+        """
         def routine():
-            self._transition({
-                "head_pan": pan,
-                "head_tilt": tilt,
-                far: self.sym(far, 0),
-            }, 0.45)
-            self._transition({near: self.sym(near, reach)}, 0.4)
-            self._sleep(1.2)
-            self._transition({near: self.sym(near, 0)}, 0.5)
+            pan, tilt = (self._head_toward(x, y) if relative
+                         else self._head_for(x, y))
+            return self._transition({"head_pan": pan, "head_tilt": tilt}, duration)
+        return self._submit(routine, interrupt)
 
-        if self.mock:
-            print("[bear:mock] point_at(%.2f, %.2f) -> %s" % (x, y, near))
+    def look_toward(self, x, y, **kw):
+        """Alias for look_at(..., relative=True) -- the head-relative mapping."""
+        kw["relative"] = True
+        return self.look_at(x, y, **kw)
+
+    def point_at(self, x, y, interrupt=True, relative=True):
+        """Face it, then raise the arm on the side it's actually on.
+
+        Which arm is decided from where his head ends up relative to his BODY,
+        not from where the thing sat in the frame -- if his head was already
+        turned, those are different answers.
+        """
+        def routine():
+            pan, tilt = (self._head_toward(x, y) if relative
+                         else self._head_for(x, y))
+            home_pan = HOME["head_pan"]
+            his_left = (pan - home_pan) * DIRECTION["head_pan"] >= 0
+            near = "arm_l" if his_left else "arm_r"
+            far = "arm_r" if near == "arm_l" else "arm_l"
+            # The further round he had to turn, the higher the arm goes.
+            span = abs(LIMITS["head_pan"][1] - home_pan) or 1
+            lift = 0.55 + 0.45 * min(1.0, abs(pan - home_pan) / span)
+            if self.mock:
+                print("[bear:mock] point_at(%.2f, %.2f) -> pan %d, %s at %.0f%%"
+                      % (x, y, pan, near, lift * 100))
+
+            self._transition({"head_pan": pan, "head_tilt": tilt,
+                              far: HOME[far]}, 0.45)
+            self._snap({near: self.reach(near, -lift)})
+            self._sleep(1.2)
+            self._snap({near: HOME[near]})
+
         return self._submit(routine, interrupt)
 
     def dance(self, seconds=10, interrupt=True):
@@ -599,6 +632,26 @@ class Body:
         self.close()
 
     # ---------------------------------------------------------- internals ----
+    def _head_toward(self, x, y):
+        """Where his head must go to FACE a point in the frame he can see now.
+
+        The camera is on his head, so (x, y) is an offset from wherever he is
+        already looking: dead centre means "don't move". This is the mapping
+        that converges -- each call reduces the error instead of restarting
+        from his body's centre line.
+        """
+        x = _clamp(float(x), 0.0, 1.0)
+        y = _clamp(float(y), 0.0, 1.0)
+        if MIRROR_CAMERA:
+            x = 1.0 - x
+        pan_now = self.angles.get("head_pan")
+        tilt_now = self.angles.get("head_tilt")
+        pan_now = HOME["head_pan"] if pan_now is None else pan_now
+        tilt_now = HOME["head_tilt"] if tilt_now is None else tilt_now
+        pan = pan_now + DIRECTION["head_pan"] * (0.5 - x) * CAMERA_FOV_X * LOOK_GAIN
+        tilt = tilt_now + DIRECTION["head_tilt"] * (0.5 - y) * CAMERA_FOV_Y * LOOK_GAIN
+        return pan, tilt
+
     def _head_for(self, x, y):
         x = _clamp(float(x), 0.0, 1.0)
         y = _clamp(float(y), 0.0, 1.0)
