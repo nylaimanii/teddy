@@ -20,7 +20,7 @@ import time
 from collections import deque
 from fractions import Fraction
 
-from brain import activity, badges, flags, howto, screen
+from brain import activity, badges, flags, howto, screen, tutor
 from brain import snowflake as sf
 from brain.mocks import MockBody, MockVision, MockVoice
 
@@ -573,33 +573,105 @@ class Teddy:
             screen.update(status="saved")
 
     def do_homework(self, question=None, **_):
+        """Tutor, not answer key: small guided questions, kid answers each one, hints when stuck."""
         q = question
-        if not q or q.lower().strip() in ("homework", "help with homework", "homework help"):
-            screen.show("listen", caption="What's your question?")
-            self.say("Ooh, homework! What's your question?")
-            q = self.listen(8)
+        if not q or q.lower().strip() in ("homework", "help with homework", "homework help", "help me with my homework"):
+            screen.show("listen", face="listening", caption="What's your homework question?")
+            self.say("Ooh, homework! What's the question?")
+            q = self.listen(12)
         if not q:
-            return self.say("That's okay, ask me any time.")
-        self._safe(self.body.pose, "think")
+            return self.say("No worries, ask me any time.")
+        self._pose("thinking", "think")
         expr = math_expr(q)
-        truth = math_eval(expr) if expr else None
+        truth = tutor._eval(expr) if expr else None
+        activity.set_current(f"Homework: {q}")
         if truth is not None:
-            screen.show("think", caption="Let me work it out…")
-            steps = self._while_saying("Let's work it out together!", math_steps, q, expr, truth)
-            screen.show("homework", question=q, expr=expr, steps=steps, step=0, answer=truth)
-            for i, st in enumerate(steps):
-                if self._stop.is_set():
-                    return "stopped"
-                screen.update(step=i)
-                self.say(st["say"])
-            if self._stop.is_set():
-                return "stopped"
-            screen.update(done=True)
-            return self.say("You're so smart! Want to try another one?", mood="happy", pose="happy")
-        screen.show("think", caption="Let me check my books…")
-        r = self._while_saying("Good question! Let me check my books.", sf.ask_detailed, q, "homework") or {}
-        screen.show("answer", title="Homework", question=q, text=r.get("text", sf.NOT_SURE), source=r.get("source"))
-        return self.say(r.get("answer", sf.NOT_SURE))
+            return self._math_tutor(q, expr, truth)
+        return self._concept_tutor(q)
+
+    def _math_tutor(self, q, expr, truth):
+        screen.show("think", face="thinking", caption="Let's figure it out…")
+        steps = self._while_saying("Ooh, let's figure it out together!", tutor.math_plan, q, expr, truth)
+        t0, tries_total = time.time(), 0
+        activity.log("homework_start", skill="Math", question=q, steps=len(steps))
+        card = dict(question=q, problem=tutor.pretty(expr), steps=[{"show": s["show"]} for s in steps])
+        solved = []
+        for i, st in enumerate(steps):
+            last = i == len(steps) - 1
+            screen.show("homework", face="talking", step=i, solved=solved, **card)
+            self.say(st["ask"])
+            tries = quiet = 0
+            while True:
+                screen.update(face="listening", waiting=True)
+                reply = self.listen(20)
+                screen.update(waiting=False)
+                if self._stop.is_set() or howto.classify_reply(reply) == "stop":
+                    activity.set_current(None)
+                    return self.say("Okay! Let's finish it later.") if reply else "stopped"
+                n = tutor.parse_number(reply)
+                if n is None:
+                    if not reply:
+                        quiet += 1
+                        if quiet >= 5:
+                            activity.set_current(None)
+                            return self.say("Let's finish it later, okay?")
+                        if quiet == 1:
+                            self.say("Take your time! Tell me a number when you've got it.")
+                    elif howto.classify_reply(reply) in ("help", "repeat"):
+                        self.say(st["hint"] if howto.classify_reply(reply) == "help" else st["ask"])
+                    else:
+                        self.say("Tell me a number when you've got it!")
+                    continue
+                tries += 1
+                tries_total += 1
+                activity.log("homework_try", skill="Math", question=q, step=i + 1, answer=tutor.fmt(n),
+                             correct=tutor.fmt(n) == st["expect"])
+                if tutor.fmt(n) == st["expect"]:
+                    solved = solved + [{"i": i, "value": st["expect"]}]
+                    screen.update(solved=solved, face="happy")
+                    if not last:
+                        self.say(random.choice(["Yes! Ooh nice.", "You got it!", "Nice! Keep going."]), mood="happy")
+                    break
+                if tries == 1:
+                    self.say(f"Hmm, not quite! {st['hint']}")
+                elif tries == 2:
+                    self.say("So close! Try counting it out slowly. You got this.")
+                elif not last:  # a middle step can be shown after 3 tries; the final answer never is
+                    self.say(f"It's {st['expect']}. Let's keep going!")
+                    solved = solved + [{"i": i, "value": st["expect"]}]
+                    screen.update(solved=solved)
+                    break
+                else:
+                    self.say("Try it with your fingers or some blocks, then tell me what you get!")
+        activity.log("homework_done", skill="Math", question=q, tries=tries_total,
+                     duration_s=round(time.time() - t0))
+        activity.set_current(None)
+        screen.update(done=True, face="happy")
+        self._pose("celebrate", "happy")
+        return self.say("You figured it out yourself! Want to try another one?", mood="happy")
+
+    def _concept_tutor(self, q):
+        screen.show("think", face="thinking", caption="Hmm, let me think…")
+        hint, src = self._while_saying("Ooh, good question!", tutor.concept_hint, q) or ("What do you already know?", [])
+        activity.log("homework_start", skill="Homework", question=q)
+        for attempt in range(3):
+            screen.show("hint", face="talking", question=q, hint=hint, source=(src or [None])[0])
+            self.say(hint)
+            screen.update(face="listening", waiting=True)
+            reply = self.listen(20)
+            screen.update(waiting=False)
+            if not reply or howto.classify_reply(reply) == "stop":
+                break
+            fb = tutor.concept_feedback(q, reply, hint)
+            activity.log("homework_try", skill="Homework", question=q, correct=fb["correct"])
+            if fb["correct"]:
+                screen.update(face="happy")
+                self._pose("celebrate", "happy")
+                activity.set_current(None)
+                return self.say(fb["reply"] or "Yes! You got it!", mood="happy")
+            hint = fb["reply"]
+        activity.set_current(None)
+        return self.say("Good thinking! Let's look it up in your book together, or ask a grown-up.")
 
     def do_grownup(self, **_):
         """Kid mode: any ouchie or scary moment -> get a grown-up (no medical talk)."""
