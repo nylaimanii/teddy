@@ -93,7 +93,13 @@ RELAX_AFTER_MOVE = {"leg_l_side", "leg_l_kick", "leg_r_side", "leg_r_kick"}
 # a moment of dwell afterwards to finish shoving the fabric out of the way
 # before we ask it for anything else.
 ARM_JOINTS = {"arm_l", "arm_r"}
-ARM_EXCLUSIVE = True    # arms never move at the same instant as anything else
+
+# Joints that get the battery to themselves. Add "head_pan" here if the head
+# turns out to be stalling in the fabric rather than slipping -- it is one
+# small servo dragging a whole stuffed head around, the same problem the arms
+# have. Costs pace: every gesture mixing that joint with another gets split.
+EXCLUSIVE_JOINTS = set(ARM_JOINTS)
+ARM_EXCLUSIVE = True    # these never move at the same instant as anything else
 ARM_SETTLE = 0.16       # seconds of hold after every arm move
 ARMS_ONE_AT_A_TIME = False   # True = left and right arms take turns too
                              # (flip this if both-arms-at-once still sags)
@@ -115,6 +121,17 @@ CAMERA_FOV_X = 49.6
 CAMERA_FOV_Y = 38.2
 LOOK_GAIN = 0.9         # slightly under-turn; overshooting then correcting
                         # looks worse than creeping up on it
+
+# Relative aiming is open-loop: we turn by what the frame says and trust the
+# head to follow. When it doesn't -- a stalled pan servo, a hat that swivels
+# on his head instead of with it -- the target never leaves the same spot in
+# frame, every call asks for the same correction again, and he walks to the
+# end stop. A real target is never more than half a frame off axis (~25 deg),
+# so accumulating more than this much turn in one direction without the target
+# ever reaching the middle means the head is not actually moving.
+LOOK_CENTRED = 0.12     # |x-0.5| within this counts as "facing it"; also a
+                        # deadband, so a centred target doesn't cause jitter
+LOOK_RUNAWAY = 55.0     # degrees of same-direction turn before we call it stalled
 
 # Only used by look_at(..., relative=False), the old absolute mapping.
 LOOK_PAN = (55, -55)    # offset from neutral at x=0 (his left) and x=1
@@ -184,6 +201,8 @@ class Body:
                 print("[bear] no Arduino found -- mock mode")
                 self.mock = True
 
+        self._look_drift = 0.0       # accumulated relative turn since he last
+        self._look_stalled = False   # actually faced something
         self._io_lock = threading.Lock()   # one writer on the wire at a time
         self._lock = threading.Lock()
         self._cv = threading.Condition(self._lock)
@@ -361,11 +380,11 @@ class Body:
         return worst
 
     def _split_for_arms(self, targets):
-        """[(targets, is_arm_block)] -- arms first, alone, then everything else."""
+        """[(targets, exclusive?)] -- exclusive joints first and alone."""
         arms, rest = {}, {}
         for joint, raw in targets.items():
             name = self._resolve(joint)
-            (arms if name in ARM_JOINTS else rest)[name] = raw
+            (arms if name in EXCLUSIVE_JOINTS else rest)[name] = raw
         blocks = []
         if arms and ARMS_ONE_AT_A_TIME:
             blocks += [({j: v}, True) for j, v in arms.items()]
@@ -539,11 +558,12 @@ class Body:
         """
         def routine():
             # non-arm joints in batches of three, then the arms on their own
-            names = [j for j in JOINTS if j not in ARM_JOINTS] + sorted(ARM_JOINTS)
+            names = ([j for j in JOINTS if j not in EXCLUSIVE_JOINTS]
+                     + sorted(EXCLUSIVE_JOINTS))
             for i in range(0, len(names), MAX_SIMULTANEOUS):
                 batch = names[i:i + MAX_SIMULTANEOUS]
-                if ARM_EXCLUSIVE and any(j in ARM_JOINTS for j in batch):
-                    batch = [j for j in batch if j in ARM_JOINTS]
+                if ARM_EXCLUSIVE and any(j in EXCLUSIVE_JOINTS for j in batch):
+                    batch = [j for j in batch if j in EXCLUSIVE_JOINTS]
                 for joint in batch:
                     self.angles[joint] = None   # force the write
                     self._write(joint, self._safe(joint, HOME[joint]))
@@ -632,6 +652,19 @@ class Body:
         self.close()
 
     # ---------------------------------------------------------- internals ----
+    @property
+    def look_stalled(self):
+        """True if relative aiming gave up because the head wasn't following.
+        senses/ and brain/ can watch this to fall back to a search."""
+        return self._look_stalled
+
+    def reset_look(self):
+        """Forget the runaway guard's history (call after fixing the head or
+        deliberately moving him somewhere else)."""
+        self._look_drift = 0.0
+        self._look_stalled = False
+        return self
+
     def _head_toward(self, x, y):
         """Where his head must go to FACE a point in the frame he can see now.
 
@@ -648,9 +681,32 @@ class Body:
         tilt_now = self.angles.get("head_tilt")
         pan_now = HOME["head_pan"] if pan_now is None else pan_now
         tilt_now = HOME["head_tilt"] if tilt_now is None else tilt_now
-        pan = pan_now + DIRECTION["head_pan"] * (0.5 - x) * CAMERA_FOV_X * LOOK_GAIN
-        tilt = tilt_now + DIRECTION["head_tilt"] * (0.5 - y) * CAMERA_FOV_Y * LOOK_GAIN
-        return pan, tilt
+        off_x, off_y = 0.5 - x, 0.5 - y
+
+        # Already facing it: don't move, and forget any accumulated drift.
+        if abs(off_x) <= LOOK_CENTRED and abs(off_y) <= LOOK_CENTRED:
+            self._look_drift = 0.0
+            self._look_stalled = False
+            return pan_now, tilt_now
+
+        d_pan = DIRECTION["head_pan"] * off_x * CAMERA_FOV_X * LOOK_GAIN
+        d_tilt = DIRECTION["head_tilt"] * off_y * CAMERA_FOV_Y * LOOK_GAIN
+
+        # Turning the same way again? Add it up. Turning back the other way
+        # means the view really did change, so start the count over.
+        if d_pan * self._look_drift < 0:
+            self._look_drift = 0.0
+        self._look_drift += d_pan
+
+        if abs(self._look_drift) > LOOK_RUNAWAY:
+            if not self._look_stalled:
+                print("[bear] look: turned %.0f deg and it is still at x=%.2f "
+                      "-- head isn't following, giving up (see look_stalled)"
+                      % (abs(self._look_drift), x))
+                self._look_stalled = True
+            return pan_now, tilt_now
+
+        return pan_now + d_pan, tilt_now + d_tilt
 
     def _head_for(self, x, y):
         x = _clamp(float(x), 0.0, 1.0)
