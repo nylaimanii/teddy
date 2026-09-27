@@ -161,7 +161,7 @@ def teddy_api_js():
 @app.get("/config.js")
 def config_js():
     """On the Mac the API is this same origin (""); Vercel's build writes its own config.js."""
-    cfg = {"api": "", "video": os.getenv("TEDDY_VIDEO_URL", "")}
+    cfg = {"api": "", "video": os.getenv("TEDDY_VIDEO_URL", ""), "parent": os.getenv("TEDDY_PARENT_URL", "/parent")}
     return Response(f"window.TEDDY_CONFIG = {json.dumps(cfg)};\n", media_type="text/javascript",
                     headers={"Cache-Control": "no-store"})
 

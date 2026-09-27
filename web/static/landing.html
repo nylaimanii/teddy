@@ -3,204 +3,163 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teddy · the AI bear companion</title>
-<meta name="description" content="Teddy is an AI teddy bear companion for kids home alone and seniors living alone. No screen to learn: just talk, point, and wave. His brain and memory run on Snowflake Cortex.">
+<title>Teddy · a buddy that helps kids do it themselves</title>
+<meta name="description" content="Teddy is a teddy bear buddy that helps kids 5 to 10 be independent: find their stuff, figure out homework, learn how-tos step by step, and read. No screen to learn. Just talk, point and wave.">
 <meta property="og:title" content="Teddy · the interface is a teddy bear">
-<meta property="og:description" content="An AI teddy bear companion for people who are alone. Talk, point, and wave. Powered by Snowflake Cortex.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧸</text></svg>">
+<meta property="og:description" content="A teddy bear buddy that helps kids do things themselves. Brain on Snowflake.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='24' cy='24' r='16' fill='%23d9a36a'/><circle cx='76' cy='24' r='16' fill='%23d9a36a'/><circle cx='50' cy='56' r='40' fill='%23d9a36a'/><circle cx='50' cy='68' r='18' fill='%23f4dcba'/><circle cx='36' cy='48' r='5' fill='%235b3a22'/><circle cx='64' cy='48' r='5' fill='%235b3a22'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Gaegu:wght@700&display=swap" rel="stylesheet">
 <style>
   :root {
     color-scheme: light;
-    --bg: #fbf7f0; --surface: #ffffff; --ink: #1b1712; --ink-2: #5a5146; --line: #eadfce;
-    --honey: #f2b233; --honey-ink: #1b1712; --cocoa: #7a4a21; --sky: #1f6fd1; --good: #1a7f37; --sleep: #8a6d00;
-    --shadow: 0 10px 30px rgba(84, 55, 20, .10);
-    --radius: 22px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      color-scheme: dark;
-      --bg: #15120e; --surface: #1f1b16; --ink: #fbf5ec; --ink-2: #cbbfae; --line: #3a3128;
-      --honey: #f5bd45; --honey-ink: #1b1712; --cocoa: #e0a669; --sky: #7cb8ff; --good: #56d364; --sleep: #f2c14e;
-      --shadow: 0 10px 30px rgba(0, 0, 0, .35);
-    }
-  }
-  :root[data-theme="dark"] {
-    color-scheme: dark;
-    --bg: #15120e; --surface: #1f1b16; --ink: #fbf5ec; --ink-2: #cbbfae; --line: #3a3128;
-    --honey: #f5bd45; --honey-ink: #1b1712; --cocoa: #e0a669; --sky: #7cb8ff; --good: #56d364; --sleep: #f2c14e;
-    --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+    --paper: #fbf4e6; --sheet: #fffdf7; --ink: #3f2917; --ink-2: #6f5038; --line: #5b3a22;
+    --butter: #ffe6a0; --blush: #f7c6bb; --mint: #cbe8d2; --sky: #cde2f4; --lilac: #e2d4f1; --fur: #d9a36a; --muzzle: #f4dcba;
+    --wobble: 255px 18px 225px 18px / 18px 225px 18px 255px; --wobble-2: 18px 225px 18px 255px / 255px 18px 225px 18px;
+    --lift: 4px 5px 0 rgba(74, 47, 27, .16);
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 18px/1.55 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; }
-  a { color: var(--sky); }
-  :focus-visible { outline: 4px solid var(--sky); outline-offset: 3px; border-radius: 8px; }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
-  .skip { position: absolute; left: -9999px; } .skip:focus { left: 16px; top: 16px; background: var(--surface); padding: 8px 12px; z-index: 9; }
-
-  header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 0; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 22px; text-decoration: none; color: var(--ink); }
-  .brand span { font-size: 30px; }
-  .status { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; color: var(--ink-2);
-            background: var(--surface); border: 1px solid var(--line); padding: 8px 14px; border-radius: 999px; }
-  .status i { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
-  .status.awake i { background: var(--good); } .status.asleep i { background: var(--sleep); }
-
-  .hero { display: grid; gap: 32px; align-items: center; padding: 28px 0 48px; grid-template-columns: 1fr; }
-  @media (min-width: 860px) { .hero { grid-template-columns: 1.1fr .9fr; padding: 56px 0 72px; } }
-  .eyebrow { display: inline-block; font-size: 14px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--cocoa); margin-bottom: 12px; }
-  h1 { font-size: clamp(38px, 6vw, 64px); line-height: 1.04; margin: 0 0 18px; letter-spacing: -.02em; }
-  h1 em { font-style: normal; color: var(--cocoa); }
-  .lede { font-size: 21px; color: var(--ink-2); margin: 0 0 28px; max-width: 34ch; }
-  .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 60px; padding: 0 26px; border-radius: 999px;
-         font-weight: 800; font-size: 19px; text-decoration: none; border: 2px solid transparent; }
-  .btn.primary { background: var(--honey); color: var(--honey-ink); box-shadow: var(--shadow); }
-  .btn.ghost { border-color: var(--line); color: var(--ink); background: var(--surface); }
-  .btn:hover { transform: translateY(-1px); }
-  .bearcard { position: relative; aspect-ratio: 1; border-radius: 40px; background: radial-gradient(circle at 50% 38%, #ffe6a8, #f2b233 60%, #c77d24);
-              display: grid; place-items: center; box-shadow: var(--shadow); overflow: hidden; }
-  .bearcard .bear { font-size: min(52vw, 260px); line-height: 1; animation: bob 4s ease-in-out infinite; filter: drop-shadow(0 18px 24px rgba(80, 40, 0, .35)); }
-  .bubble { position: absolute; background: #fff; color: #1b1712; font-weight: 700; font-size: 16px; padding: 10px 14px; border-radius: 16px; box-shadow: 0 6px 16px rgba(0,0,0,.15); }
-  .b1 { top: 9%; left: 7%; } .b2 { top: 20%; right: 6%; } .b3 { bottom: 10%; left: 10%; }
-  @keyframes bob { 50% { transform: translateY(-12px) rotate(-2deg); } }
-
-  section { padding: 44px 0; }
-  h2 { font-size: clamp(28px, 4vw, 38px); margin: 0 0 10px; letter-spacing: -.01em; }
-  .sub { color: var(--ink-2); margin: 0 0 26px; max-width: 60ch; }
-  .video { position: relative; aspect-ratio: 16 / 9; border-radius: var(--radius); overflow: hidden; background: var(--surface); border: 2px dashed var(--line);
-           display: grid; place-items: center; text-align: center; color: var(--ink-2); }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 18px/1.6 "Andika", system-ui, sans-serif;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .25 0 0 0 0 .15 0 0 0 .06 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  a { color: var(--line); }
+  :focus-visible { outline: 4px dashed var(--ink); outline-offset: 4px; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  h1, h2, h3, .hand { font-family: "Gaegu", cursive; font-weight: 700; letter-spacing: .01em; }
+  header.top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 0; }
+  .brand { font-family: "Gaegu"; font-weight: 700; font-size: 30px; text-decoration: none; color: var(--ink); display: flex; gap: 8px; align-items: center; }
+  .brand svg { width: 40px; height: 40px; }
+  .status { font-family: "Gaegu"; font-weight: 700; font-size: 19px; background: var(--sheet); border: 2px solid var(--line); border-radius: var(--wobble); padding: 4px 14px; display: flex; gap: 8px; align-items: center; }
+  .status i { width: 12px; height: 12px; border-radius: 50%; background: #bbb; border: 2px solid var(--line); }
+  .status.awake i { background: #5bb56f; } .status.asleep i { background: var(--butter); }
+  .hero { display: grid; gap: 28px; align-items: center; padding: 22px 0 44px; }
+  @media (min-width: 860px) { .hero { grid-template-columns: 1.1fr .9fr; padding: 44px 0 64px; } }
+  h1 { font-size: clamp(44px, 7vw, 76px); line-height: .98; margin: 0 0 16px; }
+  .lede { font-size: 21px; color: var(--ink-2); max-width: 34ch; margin: 0 0 26px; }
+  .ctas { display: flex; flex-wrap: wrap; gap: 14px; }
+  .big { display: inline-flex; align-items: center; gap: 10px; min-height: 64px; padding: 0 26px; border: 3px solid var(--line); border-radius: var(--wobble);
+         box-shadow: var(--lift); font: 700 26px "Gaegu", cursive; color: var(--ink); text-decoration: none; }
+  .big:active { transform: translate(3px, 4px); box-shadow: 1px 1px 0 rgba(74,47,27,.16); }
+  .c-butter { background: var(--butter); } .c-sky { background: var(--sky); } .c-mint { background: var(--mint); } .c-blush { background: var(--blush); } .c-lilac { background: var(--lilac); } .c-sheet { background: var(--sheet); }
+  .teddy { width: min(100%, 420px); margin: 0 auto; display: block; }
+  .ln { fill: none; stroke: var(--line); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+  .fur { fill: var(--fur); } .in { fill: var(--blush); } .muz { fill: var(--muzzle); } .dark { fill: var(--line); }
+  section { padding: 34px 0; }
+  h2 { font-size: clamp(34px, 5vw, 46px); line-height: 1.05; margin: 0 0 8px; }
+  .sub { color: var(--ink-2); margin: 0 0 22px; max-width: 60ch; }
+  .card { background: var(--sheet); border: 3px solid var(--line); border-radius: var(--wobble-2); box-shadow: var(--lift); padding: 20px 22px; }
+  .four { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .four .card h3 { font-size: 30px; margin: 6px 0 4px; line-height: 1.05; }
+  .four .card p { margin: 0; color: var(--ink-2); font-size: 16px; }
+  .four svg { width: 54px; height: 54px; fill: none; stroke: var(--line); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .video { aspect-ratio: 16/9; position: relative; overflow: hidden; display: grid; place-items: center; text-align: center; }
   .video iframe, .video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .video .ph span { display: block; font-size: 54px; }
-
-  .cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
-  .card .ico { font-size: 34px; line-height: 1; }
-  .card h3 { margin: 10px 0 6px; font-size: 20px; }
-  .card p { margin: 0; color: var(--ink-2); font-size: 16px; }
-
-  .brain { background: var(--surface); border: 1px solid var(--line); border-radius: 28px; padding: 26px; box-shadow: var(--shadow); }
-  .flow { display: grid; gap: 10px; grid-template-columns: 1fr; margin-top: 18px; }
-  @media (min-width: 760px) { .flow { grid-template-columns: repeat(4, 1fr); } }
-  .step { border-radius: 18px; padding: 16px; background: var(--bg); border: 1px solid var(--line); }
-  .step b { display: block; margin-bottom: 4px; }
-  .step code { font-size: 14px; color: var(--cocoa); }
-  .step p { margin: 6px 0 0; font-size: 15px; color: var(--ink-2); }
-
-  footer { padding: 36px 0 48px; color: var(--ink-2); font-size: 15px; border-top: 1px solid var(--line); margin-top: 24px; }
-  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
+  .jobs { display: grid; gap: 12px; }
+  .job { display: grid; grid-template-columns: 170px 1fr; gap: 12px; align-items: baseline; padding: 12px 0; border-bottom: 2px dashed rgba(91,58,34,.25); }
+  .job:last-child { border-bottom: 0; }
+  .job > b { font-family: "Gaegu"; font-size: 26px; }
+  @media (max-width: 600px) { .job { grid-template-columns: 1fr; gap: 0; } }
+  .privacy { background: var(--mint); }
+  footer { padding: 30px 0 48px; color: var(--ink-2); font-size: 15px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
 </style>
 </head>
 <body>
-<a class="skip" href="#main">Skip to content</a>
 <div class="wrap">
   <header class="top">
-    <a class="brand" href="/"><span aria-hidden="true">🧸</span> Teddy</a>
+    <a class="brand" href="/"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="24" cy="24" r="16" fill="#d9a36a"/><circle cx="76" cy="24" r="16" fill="#d9a36a"/><circle cx="50" cy="56" r="40" fill="#d9a36a"/><circle cx="50" cy="68" r="18" fill="#f4dcba"/><circle cx="36" cy="48" r="5" fill="#5b3a22"/><circle cx="64" cy="48" r="5" fill="#5b3a22"/></svg>Teddy</a>
     <span class="status" id="status" role="status"><i aria-hidden="true"></i><span>Checking on Teddy…</span></span>
   </header>
 
-  <main id="main">
+  <main>
     <div class="hero">
       <div>
-        <span class="eyebrow">OwlHacks 2026 · Human-Computer Interaction</span>
-        <h1>The interface is <em>a teddy bear.</em></h1>
-        <p class="lede">Teddy keeps company with people who are alone: kids home after school and grandparents living by themselves.
-          There's no app to learn. Just talk, point, and wave.</p>
+        <p class="hand" style="font-size:22px;margin:0 0 8px;color:var(--ink-2)">OwlHacks 2026 · Human-Computer Interaction</p>
+        <h1>A buddy that helps kids do it themselves.</h1>
+        <p class="lede">Teddy is a real teddy bear for kids 5 to 10. He helps them find their stuff, figure out homework, learn things step by step, and read. No app and no screen to learn: just say "Hey Teddy".</p>
         <div class="ctas">
-          <a class="btn primary" id="openScreen" href="/teddy"><span aria-hidden="true">🧸</span> Open Teddy's screen</a>
-          <a class="btn ghost" id="openCare" href="/caregiver"><span aria-hidden="true">📊</span> Caregiver dashboard</a>
+          <a class="big c-butter" id="openScreen" href="/teddy">Open Teddy's screen</a>
+          <a class="big c-sheet" id="openParent" href="#parents">For parents</a>
         </div>
       </div>
-      <div class="bearcard" aria-hidden="true">
-        <div class="bubble b1">"Teddy, where are my keys?"</div>
-        <div class="bubble b2">👋 wave</div>
-        <div class="bubble b3">"What's 7 × 8?"</div>
-        <div class="bear">🧸</div>
-      </div>
+      <svg class="teddy" viewBox="0 0 300 280" role="img" aria-label="Teddy smiling">
+        <circle class="fur ln" cx="68" cy="70" r="42"/><circle class="in" cx="68" cy="72" r="22"/>
+        <circle class="fur ln" cx="232" cy="70" r="42"/><circle class="in" cx="232" cy="72" r="22"/>
+        <ellipse class="fur ln" cx="150" cy="155" rx="120" ry="108"/>
+        <ellipse cx="80" cy="185" rx="20" ry="13" fill="#f7c6bb"/><ellipse cx="220" cy="185" rx="20" ry="13" fill="#f7c6bb"/>
+        <ellipse class="muz ln" cx="150" cy="195" rx="58" ry="44"/>
+        <path class="ln" d="M90 142 q15 -20 30 0 M180 142 q15 -20 30 0"/>
+        <path class="dark" d="M137 172 q13 -8 26 0 q-3 12 -13 14 q-10 -2 -13 -14 z"/>
+        <path class="ln" d="M150 186 v6"/><path class="dark" d="M124 196 q26 30 52 0 q-26 8 -52 0 z"/>
+      </svg>
     </div>
 
     <section aria-labelledby="videoTitle">
       <h2 id="videoTitle">See Teddy in action</h2>
-      <p class="sub">A real bear with eight servos, a webcam in his hat, and a brain in Snowflake.</p>
-      <div class="video" id="video">
-        <div class="ph"><span aria-hidden="true">🎬</span>Demo video coming soon</div>
+      <div class="card video" id="video"><div><p class="hand" style="font-size:30px;margin:0">Demo video coming soon</p><p class="sub" style="margin:0">A real bear: 8 servos, a camera, and a brain in Snowflake.</p></div></div>
+    </section>
+
+    <section aria-labelledby="whatTitle">
+      <h2 id="whatTitle">What Teddy does</h2>
+      <p class="sub">Always a hint, never the answer. Teddy helps kids get there themselves.</p>
+      <div class="four">
+        <div class="card"><svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="15" cy="16" r="9"/><circle cx="15" cy="16" r="3"/><path d="M21 22 L40 41 M33 34 l5 -5 M37 38 l4 -4"/></svg>
+          <h3>Find my stuff</h3><p>Keys, shoes, backpack, bunny. He looks, points his arm, and remembers where he last saw them.</p></div>
+        <div class="card"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M9 7 h21 l9 9 v25 h-30 z M30 7 v9 h9 M15 22 h17 M15 28 h17 M15 34 h10"/></svg>
+          <h3>Homework buddy</h3><p>Small guiding questions, one step at a time on the screen. The kid says the answer, not Teddy.</p></div>
+        <div class="card"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 12 l3 3 l6 -6 M23 12 h17 M8 24 l3 3 l6 -6 M23 24 h17 M9 36 h6 M23 36 h17"/></svg>
+          <h3>Show me how</h3><p>Tie shoes, brush teeth, draw a cat, pack a backpack. One step, then "done!", then the next. Earn a badge.</p></div>
+        <div class="card"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 13 q-8 -5 -19 -3 v27 q11 -2 19 3 q8 -5 19 -3 v-27 q-11 -2 -19 3 z M24 13 v27"/></svg>
+          <h3>Read this</h3><p>Hold up a page and he reads it slowly, then sounds out the tricky words.</p></div>
       </div>
     </section>
 
-    <section aria-labelledby="whoTitle">
-      <h2 id="whoTitle">Talk, point, wave. That's the whole interface.</h2>
-      <p class="sub">Built for people a touchscreen leaves out: little kids, seniors, and people who are blind or have low vision.</p>
-      <div class="cards">
-        <div class="card"><div class="ico" aria-hidden="true">🔑</div><h3>Finds your things</h3>
-          <p>"Where are my glasses?" He looks, points with his arm, and says "on the left, by the laptop". Or he remembers when he last saw them.</p></div>
-        <div class="card"><div class="ico" aria-hidden="true">📖</div><h3>Reads out loud</h3>
-          <p>Hold up a letter or a medicine label and he reads it to you.</p></div>
-        <div class="card"><div class="ico" aria-hidden="true">✏️</div><h3>Homework buddy</h3>
-          <p>Works through math one step at a time on screen, and the answers are always checked.</p></div>
-        <div class="card"><div class="ico" aria-hidden="true">📚</div><h3>Story time</h3>
-          <p>Illustrated stories on the screen, read aloud in a warm voice.</p></div>
-        <div class="card"><div class="ico" aria-hidden="true">❤️</div><h3>CPR coach and first aid</h3>
-          <p>Pumps his arms at 110 beats a minute and answers only from Red Cross, AHA and NIH guidance, naming the source.</p></div>
-        <div class="card"><div class="ico" aria-hidden="true">💛</div><h3>Checks on you</h3>
-          <p>Notices a fall, asks if you're okay, and tells your family if you don't answer.</p></div>
+    <section aria-labelledby="jobsTitle">
+      <h2 id="jobsTitle">Who does what inside Teddy</h2>
+      <div class="card jobs">
+        <div class="job"><b>Snowflake</b><span>His brain. How-to guides and homework notes live in Snowflake and are found with <b>Cortex Search</b>; <b>AI_COMPLETE</b> (llama3.3-70b) plans homework hints and writes the parent's weekly note; <b>Cortex Analyst</b> answers parents' questions; <b>AI_PARSE_DOCUMENT</b> reads the reference PDFs.</span></div>
+        <div class="job"><b>Tiger Data</b><span>A time-series log of every session, skill practiced, find and mood check-in, rolled up with continuous aggregates for the parent charts.</span></div>
+        <div class="job"><b>Solana</b><span>Finishing a how-to mints a one-of-one "skill badge" on devnet, like "Tied My Shoes!", shown as a QR code on the iPad.</span></div>
+        <div class="job"><b>Vultr</b><span>Hosts the Parent dashboard and its API, with HTTPS.</span></div>
+        <div class="job"><b>ElevenLabs</b><span>Teddy's warm voice, and a slower one for reading aloud.</span></div>
+        <div class="job"><b>Gemini</b><span>Backup eyes, when the on-device vision model isn't sure.</span></div>
       </div>
     </section>
 
-    <section aria-labelledby="brainTitle">
-      <div class="brain">
-        <h2 id="brainTitle">His brain and memory run on Snowflake</h2>
-        <p class="sub">Everything Teddy sees, hears and does becomes a row his family can ask about in plain English.</p>
-        <div class="flow">
-          <div class="step"><b>Knows first aid</b><code>AI_PARSE_DOCUMENT</code><p>Red Cross, AHA and NIH guides are parsed, chunked and indexed with Cortex Search.</p></div>
-          <div class="step"><b>Answers safely</b><code>AI_COMPLETE · llama3.3-70b</code><p>Answers only from those sources, short enough to say out loud, and names where they came from.</p></div>
-          <div class="step"><b>Remembers</b><code>SIGHTINGS · EVENTS</code><p>Where things were seen (with a photo), moods, check-ins and alerts.</p></div>
-          <div class="step"><b>Tells family</b><code>Cortex Analyst</code><p>"How was grandma this week?" becomes SQL, then a warm answer on the caregiver dashboard.</p></div>
-        </div>
-      </div>
+    <section id="parents" aria-labelledby="parentTitle">
+      <h2 id="parentTitle">For parents</h2>
+      <p class="sub">A simple weekly page: what your kid worked on, skills they learned, how they felt (mood check-ins, not a diagnosis), and "where are the keys?"</p>
+      <div class="ctas"><a class="big c-mint" id="parentLink" href="/parent">Open the Parent page</a></div>
     </section>
 
-    <section aria-labelledby="tryTitle">
-      <h2 id="tryTitle">Try it</h2>
-      <p class="sub">Open Teddy's screen on an iPad next to the bear and tap <b>Wake Teddy</b>. If his computer is offline, you'll get a demo instead.</p>
-      <div class="ctas">
-        <a class="btn primary" id="openScreen2" href="/teddy"><span aria-hidden="true">🧸</span> Open Teddy's screen</a>
-        <a class="btn ghost" id="openCare2" href="/caregiver"><span aria-hidden="true">📊</span> Caregiver dashboard</a>
+    <section aria-labelledby="privTitle">
+      <div class="card privacy">
+        <h2 id="privTitle" style="font-size:34px">Private by default</h2>
+        <p style="margin:0">Mood check-ins store only a feeling word and a time, never a face. Photos Teddy keeps to remember where things are are cropped to the object with faces blurred. The Parent page is PIN-protected.</p>
       </div>
     </section>
   </main>
-
-  <footer>
-    Made at OwlHacks 2026. Arduino Uno, 8 SG90 servos, a Logitech C270, Whisper, YOLO-World, ElevenLabs and Snowflake Cortex.
-  </footer>
+  <footer>Made at OwlHacks 2026 · Arduino Uno, 8 servos, a webcam, Whisper, YOLO-World, ElevenLabs, Gemini, Snowflake, Tiger Data, Solana and Vultr.</footer>
 </div>
 
 <script src="/config.js"></script>
 <script src="/teddy-api.js"></script>
 <script>
 (async () => {
-  // Demo video: TEDDY_VIDEO_URL (YouTube, Vimeo, or an .mp4) at deploy time.
-  const v = (window.TEDDY_CONFIG || {}).video;
-  if (v) {
-    const box = document.getElementById('video');
+  const cfg = window.TEDDY_CONFIG || {};
+  if (cfg.parent) document.getElementById('parentLink').href = cfg.parent;
+  if (cfg.video) {
+    const box = document.getElementById('video'), v = cfg.video;
     const yt = v.match(/(?:youtu\.be\/|v=|embed\/)([\w-]{11})/), vimeo = v.match(/vimeo\.com\/(\d+)/);
-    box.style.borderStyle = 'solid';
-    if (yt || vimeo) {
-      const f = document.createElement('iframe');
-      f.src = yt ? `https://www.youtube-nocookie.com/embed/${yt[1]}` : `https://player.vimeo.com/video/${vimeo[1]}`;
-      f.title = 'Teddy demo video'; f.allow = 'autoplay; fullscreen; picture-in-picture'; f.allowFullscreen = true;
-      box.replaceChildren(f);
-    } else {
-      const el = document.createElement('video'); el.src = v; el.controls = true; el.playsInline = true; el.preload = 'metadata';
-      el.setAttribute('aria-label', 'Teddy demo video'); box.replaceChildren(el);
-    }
+    if (yt || vimeo) { const f = document.createElement('iframe'); f.src = yt ? `https://www.youtube-nocookie.com/embed/${yt[1]}` : `https://player.vimeo.com/video/${vimeo[1]}`;
+      f.title = 'Teddy demo video'; f.allow = 'fullscreen; picture-in-picture'; f.allowFullscreen = true; box.replaceChildren(f); }
+    else { const el = document.createElement('video'); el.src = v; el.controls = true; el.playsInline = true; box.replaceChildren(el); }
   }
-  const st = document.getElementById('status');
-  const awake = (await TEDDY.connect()) !== null;
-  st.classList.add(awake ? 'awake' : 'asleep');
-  st.lastElementChild.textContent = awake ? 'Teddy is awake' : 'Teddy is sleeping · demo mode';
-  ['openScreen', 'openScreen2', 'openCare', 'openCare2'].forEach(id => {
-    const a = document.getElementById(id); a.href = TEDDY.link(a.getAttribute('href'));
-  });
+  const awake = (await TEDDY.connect()) !== null, st = document.getElementById('status');
+  st.classList.add(awake ? 'awake' : 'asleep'); st.lastElementChild.textContent = awake ? 'Teddy is awake' : 'Teddy is sleeping · demo';
+  const a = document.getElementById('openScreen'); a.href = TEDDY.link(a.getAttribute('href'));
+  const p = document.getElementById('parentLink');
+  if (!cfg.parent) { if (awake) p.href = TEDDY.url('/parent'); else p.parentElement.innerHTML = '<p class="sub">The Parent page opens here once it is deployed.</p>'; }
 })();
 </script>
 </body>
