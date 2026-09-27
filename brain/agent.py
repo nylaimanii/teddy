@@ -20,7 +20,7 @@ import time
 from collections import deque
 from fractions import Fraction
 
-from brain import flags, screen
+from brain import activity, badges, flags, howto, screen
 from brain import snowflake as sf
 from brain.mocks import MockBody, MockVision, MockVoice
 
@@ -480,6 +480,97 @@ class Teddy:
             return "stopped"
         screen.update(done=True)
         return self.say("The end! Did you like it?", mood="happy", pose="happy")
+
+    def _pose(self, name, fallback="neutral"):
+        """Agent A's named poses (thinking, listening, nod, celebrate, breathe...), older bears fall back."""
+        try:
+            return self.body.pose(name)
+        except ValueError:
+            return self._safe(self.body.pose, fallback)
+        except Exception as e:
+            print(f"[teddy] pose {name} failed: {e}")
+
+    # ---- how-to coach: one step, wait for "done", next step
+    CHEERS = ["Ooh nice!", "Yes! You got it.", "Nice one!", "Look at you go!", "Awesome!"]
+
+    def do_howto(self, question=None, guide_id=None, **_):
+        screen.show("think", face="thinking", caption="Let me find that…")
+        self._pose("thinking", "think")
+        g = howto.get_guide(guide_id) if guide_id else \
+            self._while_saying("Ooh, let me check my how-to book!", howto.find_guide, question or "")
+        if not g:
+            screen.show("howto_menu", face="happy", guides=howto.menu(), caption="Pick one to learn!")
+            return self.say("Hmm, I don't know that one yet! Wanna learn one of these instead?")
+        steps, t0, n = g["steps"], time.time(), len(g["steps"])
+        activity.set_current(g["skill"])
+        activity.log("howto_start", skill=g["skill"], guide=g["id"], engine=g.get("engine"))
+        card = dict(guide={k: g.get(k) for k in ("id", "title", "icon", "badge", "skill")},
+                    steps=[{"show": st["show"], "draw": st.get("draw", "")} for st in steps], total=n)
+        self.say(f"Ooh, let's {g['title'].lower()}! Tell me done when you finish each step.", mood="happy")
+        i = 0
+        while i < n:
+            if self._stop.is_set():
+                return self._howto_quit(g, i)
+            st = steps[i]
+            screen.show("howto", face="talking", step=i, **card)
+            self._pose("nod", "happy")
+            self.say(st["say"])
+            quiet = misses = 0
+            while True:
+                screen.update(face="listening", waiting=True)
+                reply = self.listen(20)
+                screen.update(waiting=False)
+                if self._stop.is_set():
+                    return self._howto_quit(g, i)
+                kind = howto.classify_reply(reply)
+                if kind == "next":
+                    activity.log("howto_step", skill=g["skill"], guide=g["id"], step=i + 1, of=n)
+                    i += 1
+                    if i < n:
+                        self.say(random.choice(self.CHEERS), mood="happy")
+                    break
+                if kind == "back":
+                    i = max(0, i - 1)
+                    break
+                if kind == "stop":
+                    return self._howto_quit(g, i, say=True)
+                if kind == "repeat":
+                    self.say(st["say"])
+                elif kind == "help":
+                    self.say(st.get("tip") or "You got this! Take your time.")
+                elif not reply:
+                    quiet += 1
+                    if quiet == 1:
+                        self.say("Take your time! Say done when you're ready.")
+                    elif quiet >= 6:  # ~2 minutes of quiet
+                        return self._howto_quit(g, i, say=True)
+                else:
+                    misses += 1
+                    self.say("Say done when you finish, or help if it's tricky!" if misses < 3 else "You got this!")
+        return self._howto_done(g, time.time() - t0)
+
+    def _howto_quit(self, g, i, say=False):
+        activity.log("howto_stop", skill=g["skill"], guide=g["id"], step=i + 1, of=len(g["steps"]))
+        activity.set_current(None)
+        screen.show("idle", face="happy")
+        return self.say("Okay! We can finish it later.") if say else "stopped"
+
+    def _howto_done(self, g, seconds):
+        activity.log("skill_done", skill=g["skill"], duration_s=round(seconds), guide=g["id"], badge=g["badge"])
+        activity.set_current(None)
+        self._pose("celebrate", "happy")
+        screen.show("badge", face="happy", badge=g["badge"], skill=g["skill"], icon=g.get("icon"), status="minting")
+        threading.Thread(target=self._mint_badge, args=(g,), daemon=True).start()
+        return self.say(f"You did it! You earned the {g['badge']} badge!", mood="happy")
+
+    def _mint_badge(self, g):
+        r = badges.mint(g["badge"], g["skill"])
+        if r.get("ok"):
+            activity.log("badge", skill=g["skill"], badge=g["badge"], mint=r.get("mint"), url=r.get("url"))
+            if screen.state().get("mode") == "badge":
+                screen.update(status="ready", url=r.get("url"), qr=r.get("qr"), mint=r.get("mint"))
+        elif screen.state().get("mode") == "badge":
+            screen.update(status="saved")
 
     def do_homework(self, question=None, **_):
         q = question

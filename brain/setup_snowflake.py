@@ -4,6 +4,7 @@ semantic model for Cortex Analyst, and a check of which Cortex models this accou
     python -m brain.setup_snowflake            # everything
     python -m brain.setup_snowflake --docs     # just re-ingest data/docs/*.pdf
     python -m brain.setup_snowflake --models   # just test Cortex models
+    python -m brain.setup_snowflake --howto    # just (re)load the kid how-to guides
 """
 import sys
 import time
@@ -90,6 +91,9 @@ if __name__ == "__main__":
         setup(b)
     if not args or "--docs" in args:
         docs(b)
+    if not args or "--howto" in args:
+        from brain import howto
+        print(f"5b) How-to guides -> HOWTO_GUIDES/HOWTO_STEPS + HOWTO_SEARCH: {howto.load_to_snowflake()} guides")
     if not args or "--models" in args:
         models(b)
     if not args or "--smoke" in args:

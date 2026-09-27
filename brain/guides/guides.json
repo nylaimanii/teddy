@@ -1,0 +1,118 @@
+[
+  {
+    "id": "tie-shoes", "title": "Tie your shoes", "skill": "Tying shoes", "badge": "Tied My Shoes!",
+    "icon": "shoe", "audience": "kid",
+    "summary": "Bunny-ears way to tie shoelaces, one little step at a time.",
+    "keywords": "tie shoes shoelaces laces knot bow sneakers bunny ears lace up",
+    "steps": [
+      {"show": "Make an X with the laces", "say": "Grab one lace in each hand and cross them to make a big X.", "tip": "Hold the laces near the ends. One goes over the other, like a little X."},
+      {"show": "Tuck one under and pull", "say": "Now tuck the top lace under the other one, and pull both tight.", "tip": "Push the top lace down through the middle of the X, then pull the ends apart."},
+      {"show": "Make bunny ear one", "say": "Make a loop with one lace. That's bunny ear number one!", "tip": "Fold the lace in half like a hairpin and pinch the bottom."},
+      {"show": "Make bunny ear two", "say": "Make a loop with the other lace. Bunny ear number two!", "tip": "Same as the first one. Now you have two bunny ears."},
+      {"show": "Cross the bunny ears", "say": "Cross the two bunny ears into an X.", "tip": "Lay one bunny ear over the other one."},
+      {"show": "Tuck one ear through", "say": "Tuck the top bunny ear under and through the hole at the bottom.", "tip": "It's the same move as step two, just with the loops. Down and through!"},
+      {"show": "Pull both ears tight", "say": "Pull both bunny ears tight. Ta-da, a bow!", "tip": "Pull slowly and hold the loops, not the ends."}
+    ]
+  },
+  {
+    "id": "brush-teeth", "title": "Brush your teeth", "skill": "Brushing teeth", "badge": "Sparkly Teeth!",
+    "icon": "tooth", "audience": "kid",
+    "summary": "Two minutes of brushing, top, bottom, insides and tongue.",
+    "keywords": "brush teeth toothbrush toothpaste brushing mouth clean teeth dentist floss",
+    "steps": [
+      {"show": "A pea of toothpaste", "say": "Squeeze a tiny bit of toothpaste on your brush. Just a pea-sized blob.", "tip": "Smaller than a grape. Like one little pea!"},
+      {"show": "Top teeth, little circles", "say": "Brush your top teeth with tiny circles, all the way to the back.", "tip": "Go slow, like you're drawing little bubbles on each tooth."},
+      {"show": "Bottom teeth, little circles", "say": "Now the bottom teeth. Little circles again!", "tip": "Start on one side and walk the brush to the other side."},
+      {"show": "Brush the insides", "say": "Tilt the brush and brush the insides of your teeth too.", "tip": "The side that touches your tongue. They like to be clean too!"},
+      {"show": "Chewing tops", "say": "Scrub the flat chewing tops, back and forth.", "tip": "The big bumpy teeth in the back. Scrub scrub scrub."},
+      {"show": "Gently brush your tongue", "say": "Give your tongue a gentle brush. Tickly!", "tip": "Just a soft brush, from back to front."},
+      {"show": "Spit and rinse", "say": "Spit it out and rinse your brush. Sparkly!", "tip": "Spit in the sink, then rinse the brush under the water."}
+    ]
+  },
+  {
+    "id": "draw-cat", "title": "Draw a cat", "skill": "Drawing a cat", "badge": "Drew a Cat!",
+    "icon": "cat", "audience": "kid",
+    "summary": "Draw a cute cat from simple shapes: circle, triangles, and lines.",
+    "keywords": "draw a cat drawing kitty kitten art picture sketch doodle animal",
+    "steps": [
+      {"show": "Draw a big circle", "say": "Draw a big circle. That's the cat's head!", "tip": "It doesn't have to be perfect. Wobbly circles are cute.",
+       "draw": "<circle cx='100' cy='95' r='45'/>"},
+      {"show": "Two triangle ears", "say": "Add two pointy triangle ears on top.", "tip": "One on the left and one on the right, like little mountains.",
+       "draw": "<path d='M68 68 L62 30 L92 52'/><path d='M132 68 L138 30 L108 52'/>"},
+      {"show": "Two eyes", "say": "Draw two eyes in the middle of the head.", "tip": "Two dots or two little circles. Make them look happy!",
+       "draw": "<circle cx='84' cy='90' r='6' class='fill'/><circle cx='116' cy='90' r='6' class='fill'/>"},
+      {"show": "A tiny nose", "say": "Put a tiny upside-down triangle nose under the eyes.", "tip": "Point the triangle down, right in the middle.",
+       "draw": "<path d='M94 104 L106 104 L100 111 Z' class='fill'/>"},
+      {"show": "A smiley mouth", "say": "Under the nose, draw a mouth like a little letter W.", "tip": "Two little curves hanging down from the nose.",
+       "draw": "<path d='M100 111 q-8 10 -16 4 M100 111 q8 10 16 4'/>"},
+      {"show": "Whiskers", "say": "Add whiskers! Three lines on each side.", "tip": "Start near the nose and draw lines going out, like sun rays.",
+       "draw": "<path d='M78 106 L48 100 M78 112 L46 113 M78 118 L50 126 M122 106 L152 100 M122 112 L154 113 M122 118 L150 126'/>"},
+      {"show": "Body and a curly tail", "say": "Draw a round body under the head, and a curly tail. Meow!", "tip": "A big U shape for the body, then a swoosh for the tail.",
+       "draw": "<path d='M70 134 Q58 186 100 186 Q142 186 130 134'/><path d='M134 172 q40 2 30 -40'/>"}
+    ]
+  },
+  {
+    "id": "pack-backpack", "title": "Pack your backpack", "skill": "Packing my backpack", "badge": "Packed & Ready!",
+    "icon": "backpack", "audience": "kid",
+    "summary": "Get your school bag ready the night before, so mornings are easy.",
+    "keywords": "pack backpack school bag schoolbag get ready for school homework folder lunch pencil case",
+    "steps": [
+      {"show": "Homework folder first", "say": "Put your homework folder in first, flat against the back.", "tip": "Flat things go in the back so they don't get squished."},
+      {"show": "Books and notebooks", "say": "Now slide in your books and notebooks.", "tip": "Big ones first, little ones in front."},
+      {"show": "Pencil case", "say": "Pop in your pencil case.", "tip": "Is it zipped? Then no pencils escape!"},
+      {"show": "Snack and water bottle", "say": "Put your snack in, and your water bottle in the side pocket.", "tip": "The side pocket is the stretchy one on the outside."},
+      {"show": "Anything for your teacher?", "say": "Anything to give your teacher? Like a note or a form? Put it in the folder.", "tip": "Check the kitchen table or the fridge for notes."},
+      {"show": "Zip it and hang it up", "say": "Zip it up and put it by the door. You're ready for tomorrow!", "tip": "By the door means you can't forget it in the morning."}
+    ]
+  },
+  {
+    "id": "wash-hands", "title": "Wash your hands", "skill": "Washing hands", "badge": "Squeaky Clean!",
+    "icon": "hands", "audience": "kid",
+    "summary": "Soap, scrub for twenty seconds, rinse and dry.",
+    "keywords": "wash hands handwashing soap clean hands germs sink",
+    "steps": [
+      {"show": "Wet your hands", "say": "Turn on the water and get your hands wet.", "tip": "Warm or cold water both work."},
+      {"show": "Add soap", "say": "Put some soap on your hands.", "tip": "One pump is plenty."},
+      {"show": "Scrub for 20 seconds", "say": "Scrub everywhere for twenty seconds! Backs, between your fingers, and under your nails.", "tip": "Sing Happy Birthday two times. That's twenty seconds!"},
+      {"show": "Rinse", "say": "Rinse all the bubbles off.", "tip": "Hold your hands under the water till the bubbles are gone."},
+      {"show": "Dry them", "say": "Dry your hands on a towel. Squeaky clean!", "tip": "Pat pat pat, till they're dry."}
+    ]
+  },
+  {
+    "id": "make-bed", "title": "Make your bed", "skill": "Making my bed", "badge": "Bed Boss!",
+    "icon": "bed", "audience": "kid",
+    "summary": "Straighten the sheet and blanket, then pillow on top.",
+    "keywords": "make bed making the bed tidy room blanket sheets pillow bedroom chores",
+    "steps": [
+      {"show": "Pull the sheet up", "say": "Pull the sheet up to the top of the bed and smooth it out.", "tip": "Swoosh your hands across it to get the bumps out."},
+      {"show": "Pull the blanket up", "say": "Now pull the blanket up over it.", "tip": "Grab the top corners and pull toward the pillow."},
+      {"show": "Smooth it flat", "say": "Smooth it flat, like ironing with your hands.", "tip": "Start in the middle and push the wrinkles out to the sides."},
+      {"show": "Pillow on top", "say": "Fluff your pillow and put it at the top. Bed boss!", "tip": "Give it a little punch to fluff it up."}
+    ]
+  },
+  {
+    "id": "rock-paper-scissors", "title": "Play Rock Paper Scissors", "skill": "Rock Paper Scissors", "badge": "Game Champ!",
+    "icon": "hand", "audience": "kid",
+    "summary": "Learn the three hand shapes and who beats who.",
+    "keywords": "rock paper scissors game play a game hand game roshambo",
+    "steps": [
+      {"show": "Rock is a fist", "say": "Rock is a fist. Make a rock!", "tip": "Squeeze your hand into a ball."},
+      {"show": "Paper is a flat hand", "say": "Paper is a flat hand. Make paper!", "tip": "Open your hand wide and flat, like a pancake."},
+      {"show": "Scissors are two fingers", "say": "Scissors are two fingers, like a peace sign. Snip snip!", "tip": "Just your pointer finger and middle finger."},
+      {"show": "Who beats who", "say": "Rock smashes scissors. Scissors cut paper. And paper covers rock.", "tip": "Each one beats one and loses to one. It's a circle!"},
+      {"show": "Rock, paper, scissors, shoot!", "say": "Now play with a grown-up! Say rock, paper, scissors, shoot, and show your hand.", "tip": "Everyone shows their hand at the same time on shoot."}
+    ]
+  },
+  {
+    "id": "i-spy", "title": "Play I Spy", "skill": "I Spy", "badge": "Super Spotter!",
+    "icon": "eye", "audience": "kid",
+    "summary": "A looking game: give a color clue and friends guess the thing.",
+    "keywords": "i spy game play a game guessing game look colors",
+    "steps": [
+      {"show": "Pick something secret", "say": "Look around and pick something you can see. Keep it a secret!", "tip": "Pick something big enough for everyone to see."},
+      {"show": "Give a color clue", "say": "Say, I spy with my little eye, something that is, and then its color.", "tip": "Like: I spy something that is blue."},
+      {"show": "Let them guess", "say": "Let your friends guess. Say yes or no to each guess.", "tip": "If they're stuck, give one more clue, like its shape."},
+      {"show": "Swap turns", "say": "Whoever guesses it gets the next turn!", "tip": "Now you get to be the guesser."}
+    ]
+  }
+]
