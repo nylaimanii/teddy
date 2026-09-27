@@ -237,6 +237,67 @@ def normalize_query(query):
     return SYNONYMS.get(q, q)
 
 
+# ---------- face emotion: YuNet face box -> HSEmotion (AffectNet, ONNX, CPU) ----------
+MOODS = ["happy", "sad", "angry", "surprised", "neutral", "fearful"]
+# HSEmotion 8 classes -> our 6 (contempt/disgust read as angry on a kid's face)
+_HSE_TO_MOOD = [2, 2, 2, 5, 0, 4, 1, 3]  # Anger Contempt Disgust Fear Happiness Neutral Sadness Surprise
+MOOD_WINDOW = 5.0
+
+
+def _emotion_models():
+    with _model_lock:
+        if "emotion" not in _models:
+            _models["emotion"] = None
+            try:
+                import onnxruntime as ort
+                for name, url in [
+                    ("face_detection_yunet_2023mar.onnx", "https://github.com/opencv/opencv_zoo/raw/main/models/"
+                     "face_detection_yunet/face_detection_yunet_2023mar.onnx"),
+                    ("enet_b0_8_best_afew.onnx", "https://github.com/HSE-asavchenko/face-emotion-recognition/raw/"
+                     "main/models/affectnet_emotions/onnx/enet_b0_8_best_afew.onnx"),
+                ]:
+                    if not (MODELS / name).exists():
+                        (MODELS / name).write_bytes(requests.get(url, timeout=120).content)
+                det = cv2.FaceDetectorYN.create(str(MODELS / "face_detection_yunet_2023mar.onnx"), "", (320, 320), 0.7)
+                sess = ort.InferenceSession(str(MODELS / "enet_b0_8_best_afew.onnx"),
+                                            providers=["CPUExecutionProvider"])
+                _models["emotion"] = (det, sess, threading.Lock())
+            except Exception as e:
+                _log("face mood disabled:", e)
+        return _models["emotion"]
+
+
+def _face_emotion(img):
+    """probs over MOODS for the biggest face in img, or None. Nothing is written to disk."""
+    models = _emotion_models()
+    if img is None or models is None:
+        return None
+    det, sess, lock = models
+    h, w = img.shape[:2]
+    with lock:
+        det.setInputSize((w, h))
+        _, faces = det.detect(img)
+    if faces is None:
+        return None
+    fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])[:4]
+    if fw < 36:  # too far away to read an expression
+        return None
+    pad = 0.15 * fw
+    x1, y1 = int(max(0, fx - pad)), int(max(0, fy - pad))
+    x2, y2 = int(min(w, fx + fw + pad)), int(min(h, fy + fh + pad))
+    face = cv2.cvtColor(img[y1:y2, x1:x2], cv2.COLOR_BGR2RGB)
+    x = cv2.resize(face, (224, 224)).astype(np.float32) / 255
+    x = ((x - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]).transpose(2, 0, 1)[None].astype(np.float32)
+    with lock:
+        logits = sess.run(None, {"input": x})[0][0]
+    p = np.exp(logits - logits.max())
+    p /= p.sum()
+    out = np.zeros(len(MOODS))
+    for i, m in enumerate(_HSE_TO_MOOD):
+        out[m] += p[i]
+    return out
+
+
 def find_c270(max_index=5):
     """Index of the Logitech C270. OpenCV can't read camera names, but the C270 tops out at
     1280x720 while the MacBook and iPhone cameras default to 1920x1080. Falls back to 0."""
@@ -254,8 +315,15 @@ def find_c270(max_index=5):
 
 
 class Vision:
-    def __init__(self, cam_index=None, mock=False, source=None, background=True, log_sightings=True):
+    def __init__(self, cam_index=None, mock=False, source=None, background=True, log_sightings=True,
+                 fall_detection=None, emotions=True, on_mood=None):
+        """fall_detection: off unless True or TEDDY_FALLS=1 (Teddy is a kid buddy, not an alarm).
+        on_mood(label, conf, ts) is called whenever the smoothed face mood changes."""
         self.mock = mock
+        self.fall_detection = (os.getenv("TEDDY_FALLS") == "1") if fall_detection is None else fall_detection
+        self.on_mood = on_mood
+        self._mood_hist = deque()  # (ts, probs[6]); probabilities only, never images
+        self._mood_label = None
         self._lock = threading.Lock()
         self._frame = None
         self._running = True
@@ -292,6 +360,8 @@ class Vision:
         self._last_logged = {}
         if background:
             self._start(self._pose_loop)
+            if emotions:
+                self._start(self._mood_loop)
             if log_sightings:
                 self._start(self._sighting_loop)
 
@@ -466,15 +536,17 @@ class Vision:
         return ans or "Hmm, I'm not sure what that is. Can you hold it a little closer?"
 
     def read_text(self):
-        """Reads visible text aloud-friendly (labels, letters, medicine bottles)."""
+        """A kid holds up a word or a page: returns it ready to read aloud, the words exactly as written
+        and then the tricky ones sounded out ("el-e-phant. Elephant!"). Speak it with
+        voice.speak(text, mood="reading") for the slow voice."""
+        from senses.phonics import reading_script
         ans, _ = self._ask_vlm(
-            "Read the text in this image for someone who cannot see it. "
-            "If it is short, read it exactly. If it is long, say the most important parts "
-            "(like a medicine name, dose, date, or who a letter is from) in under 40 words. "
-            "Plain sentences for speaking aloud, no markdown. "
-            "If there is no readable text, or it is too blurry to read, reply only: UNSURE",
-            max_side=896, num_predict=90)
-        return ans or "I can't make out any words. Can you hold it closer and keep it still?"
+            "Transcribe the words a child is holding up in this image, EXACTLY as written, in reading order. "
+            "Output only those words, nothing else: no description, no quotes, no markdown. "
+            "If there are no readable words, or it is too blurry, reply only: UNSURE",
+            max_side=896, num_predict=200)
+        script = reading_script(ans) if ans else ""
+        return script or "I can't see the words yet. Can you hold it a little closer and keep it still?"
 
     def warmup(self):
         """Load all models so the first real call is fast."""
@@ -511,13 +583,15 @@ class Vision:
             box = res.boxes.xyxy[i].tolist()
             self._pose_hist.append((t, k, box, (w, h)))
             self._last_person_t = t
-            if not _solid_body(k, box, w, h):
+            if not self.fall_detection:
+                pass
+            elif not _solid_body(k, box, w, h):
                 pass  # partial/blurry body: fine for gestures, too weak to call a fall either way
             elif _is_fallen_pose(k, box):
                 self._fallen_since = self._fallen_since or t
             else:
                 self._fallen_since = None
-        elif self._lying_person(img, model):
+        elif self.fall_detection and self._lying_person(img, model):
             # nobody upright, but a person shows up when the frame is turned sideways: they're lying down
             self._last_person_t = t
             self._fallen_since = self._fallen_since or t
@@ -547,7 +621,10 @@ class Vision:
         return False
 
     def person_fallen(self, hold=2.0):
-        """True if the closest person has looked horizontal / head-at-hip-level for `hold`+ seconds."""
+        """True if the closest person has looked horizontal / head-at-hip-level for `hold`+ seconds.
+        Always False unless fall detection is switched on (see __init__)."""
+        if not self.fall_detection:
+            return False
         self._pose_ready.wait(10)
         return self._fallen_since is not None and time.time() - self._fallen_since >= hold
 
@@ -569,6 +646,39 @@ class Vision:
             return None
         self._last_gesture[g["type"]] = now
         return g
+
+    # ---------- face mood (privacy: face crops live only in memory, nothing is ever saved) ----------
+    def _mood_loop(self, every=1.0):
+        while self._running:
+            t0 = time.time()
+            try:
+                probs = _face_emotion(self.frame())
+                now = time.time()
+                if probs is not None:
+                    self._mood_hist.append((now, probs))
+                while self._mood_hist and now - self._mood_hist[0][0] > MOOD_WINDOW:
+                    self._mood_hist.popleft()
+                m = self.mood()
+                label = m and m["label"]
+                if label != self._mood_label:
+                    self._mood_label = label
+                    if m and self.on_mood:
+                        self.on_mood(m["label"], m["conf"], m["ts"])
+            except Exception as e:
+                _log("mood loop error:", e)
+            time.sleep(max(0.05, every - (time.time() - t0)))
+
+    def mood(self):
+        """Smoothed face emotion over the last 5 s: {"label", "conf", "ts"} or None if no face lately.
+        label is one of happy, sad, angry, surprised, neutral, fearful."""
+        hist = list(self._mood_hist)
+        if len(hist) < 2 or time.time() - hist[-1][0] > MOOD_WINDOW:
+            return None
+        avg = np.mean([p for _, p in hist], axis=0)
+        i = int(np.argmax(avg))
+        if avg[i] < 0.4:  # weak call: the model over-reads calm faces as angry, so say neutral
+            i = MOODS.index("neutral")
+        return {"label": MOODS[i], "conf": round(float(avg[i]), 2), "ts": round(hist[-1][0], 2)}
 
     def vitals(self):
         """Presage was dropped (no Python SDK), so there are no webcam vitals: always {}."""

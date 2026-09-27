@@ -2,6 +2,7 @@
 
     listen(seconds=5) -> str               # Whisper base on the Mac mic
     speak(text, mood="warm") -> bytes      # ElevenLabs Matilda (mp3); macOS `say` (wav) if that fails
+    wait_for_wake() -> str                 # blocks until "hey Teddy"; returns anything said after it
 
 Audio goes to the iPad page if one is connected: the server calls
     voice.set_sink(fn)   # fn(audio_bytes, mime, text, mood) -> True if a page took it
@@ -12,6 +13,7 @@ In mock mode listen() transcribes the audio file if given, else reads a typed li
 speak() just prints.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -35,8 +37,9 @@ VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "XrExE9yKIg1WjnnlVkGX")  # Matilda: 
 TTS_MODEL = "eleven_flash_v2_5"
 SAY_VOICE = os.getenv("TEDDY_SAY_VOICE", "")  # e.g. "Samantha"; blank = system default
 
-# mood -> (ElevenLabs stability, style, `say` words-per-minute)
+# mood -> (ElevenLabs stability, style, `say` words-per-minute[, ElevenLabs speed])
 MOODS = {
+    "reading": (0.8, 0.1, 115, 0.75),  # slow and clear, for reading words to a kid
     "warm": (0.55, 0.35, 170),
     "happy": (0.35, 0.6, 190),
     "calm": (0.75, 0.15, 150),
@@ -76,8 +79,26 @@ def transcribe(audio):
     return " ".join(s.text.strip() for s in segs).strip()
 
 
+def _record(max_seconds, stop_after_silence=1.0, level=0.015):
+    """Record up to max_seconds; stop early once someone has spoken and then gone quiet."""
+    import sounddevice as sd
+    chunks, spoke, quiet = [], False, 0.0
+    block = int(0.1 * SAMPLE_RATE)
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=block) as st:
+        for _ in range(int(max_seconds / 0.1)):
+            data, _ = st.read(block)
+            chunks.append(data[:, 0].copy())
+            loud = np.sqrt(np.mean(data ** 2)) > level
+            spoke = spoke or loud
+            quiet = 0.0 if loud else quiet + 0.1
+            if spoke and quiet >= stop_after_silence:
+                break
+    audio = np.concatenate(chunks)
+    return audio if spoke else None
+
+
 def listen(seconds=5):
-    """Record `seconds` from the mic and return what was said ("" if nothing)."""
+    """Record up to `seconds` from the mic (ends ~1 s after the speaker stops); returns the words or ""."""
     if _mock["on"]:
         if _mock["audio_file"]:
             return transcribe(str(_mock["audio_file"]))
@@ -87,13 +108,62 @@ def listen(seconds=5):
             return input("you> ").strip()
         except EOFError:
             return ""
+    audio = _record(seconds)
+    return transcribe(audio) if audio is not None else ""
+
+
+# "hey teddy" / "hi teddy" and the ways Whisper tends to spell it
+WAKE_RE = re.compile(r"\b(?:hey|hi|hay|hei|okay|ok)[\s,.!-]*(?:teddy|teddie|tedi|tedy|tetty|teddi|ted e|freddy|eddie)\b[\s,.!?-]*",
+                     re.I)
+
+
+def heard_wake(text):
+    """If text contains the wake phrase, return what came after it ("" if nothing); else None."""
+    m = WAKE_RE.search(text or "")
+    return None if m is None else text[m.end():].strip()
+
+
+def wait_for_wake(timeout=None, level=0.015):
+    """Block until someone says "hey Teddy" (or "hi Teddy"). Returns whatever they said after it in
+    the same breath ("hey Teddy, where's my bunny?" -> "where's my bunny?"), or "" if just the wake
+    phrase, or None on timeout. Ignores the mic while Teddy himself is speaking."""
+    if _mock["on"]:
+        text = _mock["text"] if _mock["text"] is not None else (
+            transcribe(str(_mock["audio_file"])) if _mock["audio_file"] else input("you (say hey teddy)> "))
+        rest = heard_wake(text)
+        return rest if rest is not None else None
     import sounddevice as sd
-    audio = sd.rec(int(seconds * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
-    sd.wait()
-    audio = audio[:, 0]
-    if np.abs(audio).max() < 0.01:  # silence, skip whisper
-        return ""
-    return transcribe(audio)
+    block = int(0.1 * SAMPLE_RATE)
+    end = time.time() + timeout if timeout else None
+    ring, voiced, quiet = [], 0, 0.0
+    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=block) as st:
+        while end is None or time.time() < end:
+            data, _ = st.read(block)
+            if speaking.is_set():
+                ring, voiced, quiet = [], 0, 0.0
+                continue
+            ring.append(data[:, 0].copy())
+            ring = ring[-60:]  # keep at most 6 s
+            loud = np.sqrt(np.mean(data ** 2)) > level
+            voiced += loud
+            quiet = 0.0 if loud else quiet + 0.1
+            # transcribe each burst of speech once it pauses (or gets long), not every 100 ms
+            if voiced >= 3 and (quiet >= 0.5 or len(ring) >= 60):
+                text = _wake_transcribe(np.concatenate(ring))
+                ring, voiced, quiet = [], 0, 0.0
+                rest = heard_wake(text)
+                if rest is not None:
+                    _log(f"woke on {text!r}")
+                    return rest
+            elif voiced == 0 and len(ring) > 10:
+                ring = ring[-10:]  # silence: keep 1 s of lead-in only
+    return None
+
+
+def _wake_transcribe(audio):
+    segs, _ = _model().transcribe(audio, language="en", beam_size=1, vad_filter=True,
+                                  hotwords="Hey Teddy", condition_on_previous_text=False)
+    return " ".join(s.text.strip() for s in segs).strip()
 
 
 _sink = None
@@ -109,13 +179,14 @@ def _elevenlabs(text, mood):
     key = os.getenv("ELEVENLABS_API_KEY")
     if not key:
         return None
-    stability, style, _ = MOODS.get(mood, MOODS["warm"])
+    stability, style, _, *speed = MOODS.get(mood, MOODS["warm"])
+    settings = {"stability": stability, "similarity_boost": 0.75, "style": style, "use_speaker_boost": True}
+    if speed:
+        settings["speed"] = speed[0]
     r = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}?output_format=mp3_44100_128",
         headers={"xi-api-key": key, "Content-Type": "application/json"},
-        json={"text": text, "model_id": TTS_MODEL,
-              "voice_settings": {"stability": stability, "similarity_boost": 0.75, "style": style,
-                                 "use_speaker_boost": True}},
+        json={"text": text, "model_id": TTS_MODEL, "voice_settings": settings},
         timeout=20,
     )
     r.raise_for_status()

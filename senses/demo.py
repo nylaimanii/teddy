@@ -53,7 +53,11 @@ def test_point():
 
 
 def test_fallen():
-    v = Vision(mock=True, source=A / "fallen.jpg", log_sightings=False)
+    off = Vision(mock=True, source=A / "fallen.jpg", log_sightings=False)
+    time.sleep(2.5)
+    check("fall detection off by default", off.person_fallen() is False, off.person_fallen())
+    off.close()
+    v = Vision(mock=True, source=A / "fallen.jpg", log_sightings=False, fall_detection=True)
     time.sleep(0.5)
     early = v.person_fallen()
     time.sleep(2.2)
@@ -98,10 +102,37 @@ def test_vlm():
     (r, src), s = timed(v._ask_vlm, "What animals are in this picture? One short sentence.", 512, 40, 0.01)
     check("gemini fallback when qwen is slow", src == "gemini" and r and "cat" in r.lower(), (r, src), s)
     v.close()
-    v = Vision(mock=True, source=A / "medicine_label.jpg", log_sightings=False, background=False)
+    v = Vision(mock=True, source=A / "kid_page.jpg", log_sightings=False, background=False)
     r, s = timed(v.read_text)
-    check("read_text", "amoxicillin" in r.lower(), r, s)
+    check("read_text (kid page, sounds out 'elephant')", "very hungry" in r.lower() and "e-le-phant" in r.lower(), r, s)
     v.close()
+
+
+def test_mood():
+    moods = []
+    v = Vision(mock=True, source=A / "zidane.jpg", log_sightings=False, on_mood=lambda *a: moods.append(a))
+    time.sleep(3.5)
+    m = v.mood()
+    check("mood() label/conf/ts", m and m["label"] in vision.MOODS and set(m) == {"label", "conf", "ts"}, m)
+    check("on_mood callback fired", len(moods) >= 1, moods)
+    v.close()
+    v = Vision(mock=True, source=A / "cats_remotes.jpg", log_sightings=False)
+    time.sleep(2.5)
+    check("mood() None with no face", v.mood() is None, v.mood())
+    v.close()
+
+
+def test_wake():
+    voice.set_mock(True, audio_file=A / "hey_teddy.wav")
+    r = voice.wait_for_wake()
+    check("wake on 'hey Teddy, where is my bunny?'", r and "bunny" in r.lower(), r)
+    voice.set_mock(True, audio_file=A / "hey_buddy.wav")
+    r = voice.wait_for_wake()
+    check("no wake on 'hey buddy'", r is None, r)
+    for t, want in [("Hi Teddy!", ""), ("hey teddy what's this", "what's this"), ("hey buddy", None),
+                    ("where did eddie put the teddy bear", None)]:
+        check(f"heard_wake({t!r})", voice.heard_wake(t) == want, voice.heard_wake(t))
+    voice.set_mock(False)
 
 
 def test_sightings():
@@ -185,7 +216,7 @@ def watch(seconds=180):
 
 
 TESTS = {"detect": test_detect, "point": test_point, "fallen": test_fallen, "gestures": test_motion_gestures,
-         "vlm": test_vlm, "sightings": test_sightings, "vitals": test_vitals, "voice": test_voice}
+         "vlm": test_vlm, "mood": test_mood, "wake": test_wake, "sightings": test_sightings, "vitals": test_vitals, "voice": test_voice}
 
 if __name__ == "__main__":
     args = sys.argv[1:]
