@@ -27,7 +27,8 @@ ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
 
 TZ = os.getenv("TEDDY_TZ", "America/New_York")
-OWNER = os.getenv("TEDDY_OWNER", "Grandma Rose")
+OWNER = os.getenv("TEDDY_OWNER") or (os.getenv("TEDDY_KID", "Maya") if os.getenv("TEDDY_AUDIENCE", "kid") == "kid"
+                                     else "Grandma Rose")
 OLLAMA_MODEL = os.getenv("TEDDY_OLLAMA_MODEL", "qwen2.5:7b")
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 # Open models, best first (confirmed with SHOW CORTEX BASE MODELS). Override with TEDDY_CORTEX_MODEL.
@@ -524,7 +525,11 @@ def ask(question, domain=None):
 _SCHEMA_DOC = """Tables:
 EVENTS_FLAT(TS timestamp, DAY date, KIND text, SOURCE text, INTENT text, OBJECT text, MOOD_SCORE int 1-5,
   MOOD text, STATUS text, HEART_RATE float, TEXT text, REPLY text)
-  KIND values: intent, gesture, mood, fall_check, alert, speak, heard, vitals, ask.
+  KIND values: intent, gesture, mood, fall_check, alert, speak, heard, vitals, ask, and for kids: howto_start,
+  howto_step, skill_done, homework_start, homework_try, homework_done, find, read, badge, mood_checkin, upset_moment.
+  Kid columns: SKILL, FEELING, HELPING_WITH (what Teddy was helping with), DURATION_S, BADGE, QUESTION, CORRECT.
+MOODS(TS timestamp, KID text, LABEL text calm|happy|sad|frustrated|upset, CONF float, ACTIVITY text)
+  = mood check-in readings (labels only, not a diagnosis).
   mood rows have MOOD_SCORE and MOOD. alert rows have STATUS (fallen, no_response, help_requested).
   heard rows have TEXT = what the person said. vitals rows have HEART_RATE.
 SIGHTINGS(TS timestamp, LABEL text, X float 0-1 left-right, Y float 0-1 top-bottom)
@@ -596,12 +601,13 @@ def caregiver_ask(question):
     except Exception:
         digest = {}
     summary_prompt = (
-        f"You help a caregiver check on {OWNER}, who lives with an AI teddy bear. "
+        f"You help a parent/caregiver check on {OWNER}, who uses Teddy, an AI teddy bear buddy. "
         f"Now is {_now():%A %B %-d, %-I:%M %p}.\n"
         f"Caregiver asked: {question}\nData from the bear's log (JSON rows):\n"
         f"{json.dumps(rows[:40], default=str)}\n"
         f"Weekly digest (mood 1-5 per day, today last): {json.dumps(digest, default=str)}\n"
-        "Answer in 1-3 warm, plain sentences using only this data. Prefer the query rows; use the digest "
+        "Answer in 1-3 warm, plain sentences using only this data. Feelings are mood check-ins, never a "
+        "diagnosis. Prefer the query rows; use the digest "
         "for context. Use the 'when' and 'spot' fields as written. Mention times in a friendly way "
         "(e.g. 'Tuesday afternoon'). If the data is empty, say the bear hasn't noticed anything about that yet.")
     try:

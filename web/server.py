@@ -29,13 +29,15 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from brain import screen
 from brain import snowflake as sf
 from brain.agent import INTENTS, Teddy
+from web.parent import page as parent_page
+from web.parent import router as parent_router
 
 STATIC = Path(__file__).parent / "static"
 MOCK = "--mock" in sys.argv or os.getenv("TEDDY_MOCK") == "1"       # mock hardware
@@ -164,9 +166,13 @@ def config_js():
                     headers={"Cache-Control": "no-store"})
 
 
+app.include_router(parent_router)  # the Parent dashboard API (also deployed on its own to Vultr)
+app.get("/parent")(parent_page)
+
+
 @app.get("/caregiver")
 def caregiver():
-    return FileResponse(STATIC / "caregiver.html")
+    return RedirectResponse("/parent")
 
 
 @app.get("/frames/{name}")

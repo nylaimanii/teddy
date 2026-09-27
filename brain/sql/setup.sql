@@ -39,7 +39,14 @@ SELECT TS,
        DATA:status::STRING            AS STATUS,
        DATA:heart_rate::FLOAT         AS HEART_RATE,
        DATA:text::STRING              AS TEXT,
-       DATA:reply::STRING             AS REPLY
+       DATA:reply::STRING             AS REPLY,
+       DATA:skill::STRING             AS SKILL,
+       DATA:feeling::STRING           AS FEELING,
+       DATA:helping_with::STRING      AS HELPING_WITH,
+       DATA:duration_s::FLOAT         AS DURATION_S,
+       DATA:badge::STRING             AS BADGE,
+       DATA:question::STRING          AS QUESTION,
+       DATA:correct::BOOLEAN          AS CORRECT
 FROM EVENTS;
 
 -- Reference PDFs. Server-side encryption is required by AI_PARSE_DOCUMENT.

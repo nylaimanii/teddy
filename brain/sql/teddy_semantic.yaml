@@ -1,7 +1,9 @@
 name: teddy_caregiver
 description: >
-  Activity log of Teddy, an AI teddy bear that lives with a person who is often alone
-  (a senior or a child). Caregivers ask how their loved one is doing and where things were left.
+  Activity log of Teddy, an AI teddy bear buddy that helps a kid (age 5-10) do things on their own:
+  finding their stuff, homework (hints, never answers), step-by-step how-tos, and reading. Parents ask
+  what their kid worked on, which skills they learned, how they felt (mood check-ins, not diagnosis),
+  and where things were left.
 tables:
   - name: events
     description: One row per thing the bear did, heard, or noticed.
@@ -26,7 +28,10 @@ tables:
           mood = a mood check-in; fall_check = the bear checked for a fall; alert = something
           a caregiver should know (fall, no response, asked for help); speak = what the bear said;
           heard = what the person said; vitals = heart/breathing rate reading.
-        sample_values: [intent, gesture, mood, fall_check, alert, speak, heard, vitals]
+          Kid mode kinds: howto_start / howto_step / skill_done (finished a how-to; SKILL, BADGE, DURATION_S),
+          homework_start / homework_try (CORRECT) / homework_done, find (OBJECT), read, badge (Solana badge),
+          mood_checkin and upset_moment (FEELING, HELPING_WITH = what Teddy was helping with, DURATION_S).
+        sample_values: [skill_done, howto_start, homework_try, homework_done, find, upset_moment, mood_checkin, read, badge]
       - name: intent
         expr: INTENT
         data_type: VARCHAR
@@ -51,6 +56,24 @@ tables:
         expr: TEXT
         data_type: VARCHAR
         description: What the person said.
+      - name: skill
+        expr: SKILL
+        data_type: VARCHAR
+        sample_values: [Tying shoes, Brushing teeth, Drawing a cat, Packing my backpack, Math, Finding my stuff]
+      - name: feeling
+        expr: FEELING
+        data_type: VARCHAR
+        sample_values: [calm, happy, sad, frustrated, upset]
+      - name: helping_with
+        expr: HELPING_WITH
+        data_type: VARCHAR
+        description: What Teddy was helping with when an upset moment happened.
+      - name: badge
+        expr: BADGE
+        data_type: VARCHAR
+      - name: homework_question
+        expr: QUESTION
+        data_type: VARCHAR
     measures:
       - name: mood_score
         expr: MOOD_SCORE
@@ -61,6 +84,11 @@ tables:
         expr: HEART_RATE
         data_type: NUMBER
         default_aggregation: avg
+      - name: minutes
+        expr: DURATION_S / 60
+        data_type: NUMBER
+        default_aggregation: sum
+        description: Minutes spent (on finished skills, homework, or an upset moment).
       - name: event_count
         expr: TS
         data_type: NUMBER
@@ -89,3 +117,27 @@ tables:
         expr: Y
         data_type: NUMBER
         default_aggregation: avg
+  - name: moods
+    description: Mood check-in readings (a feeling word and time only, never images). Not a diagnosis.
+    base_table:
+      database: TEDDY
+      schema: CORE
+      table: MOODS
+    time_dimensions:
+      - name: ts
+        expr: TS
+        data_type: TIMESTAMP_NTZ
+    dimensions:
+      - name: feeling
+        expr: LABEL
+        data_type: VARCHAR
+        sample_values: [calm, happy, sad, frustrated, upset]
+      - name: activity
+        expr: ACTIVITY
+        data_type: VARCHAR
+        description: What Teddy was helping with at the time.
+    measures:
+      - name: readings
+        expr: TS
+        data_type: NUMBER
+        default_aggregation: count

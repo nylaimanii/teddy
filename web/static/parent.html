@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Teddy for parents</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Andika:wght@400;700&family=Gaegu:wght@700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --paper: #fbf6ec; --sheet: #fffdf8; --ink: #2e2118; --ink-2: #6b5646; --line: #e6dccb; --brown: #7a4f2c;
+    --soft: #f4ecdf; --good: #2f7d4a;
+    /* feelings: validated order (dataviz validator, light surface): calm, happy, sad, frustrated, upset */
+    --calm: #1baf7a; --happy: #eda100; --sad: #2a78d6; --frustrated: #eb6834; --upset: #4a3aa7;
+    --practice: #8a5a33;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.55 "Andika", system-ui, sans-serif; }
+  [hidden] { display: none !important; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1, h2 { font-family: "Gaegu", "Andika", cursive; font-weight: 700; margin: 0; letter-spacing: .01em; }
+  h1 { font-size: clamp(34px, 5vw, 46px); line-height: 1.05; }
+  h2 { font-size: 26px; margin-bottom: 10px; }
+  .muted { color: var(--ink-2); }
+  small.muted { font-size: 14px; }
+  :focus-visible { outline: 3px solid var(--brown); outline-offset: 2px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; align-items: flex-end; margin-bottom: 18px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 13px; border: 1px solid var(--line); background: var(--sheet); border-radius: 999px; padding: 4px 10px; color: var(--ink-2); }
+  .chip b { color: var(--ink); }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr; }
+  @media (min-width: 860px) { .grid.two { grid-template-columns: 1fr 1fr; } .grid.wide { grid-template-columns: 1.4fr 1fr; } }
+  .card { background: var(--sheet); border: 1px solid var(--line); border-radius: 18px; padding: 20px; min-width: 0; }
+  .note { font-size: 20px; line-height: 1.5; }
+  .note-by { margin-top: 8px; }
+  .privacy { background: var(--soft); border-radius: 12px; padding: 10px 14px; font-size: 15px; color: var(--ink-2); margin: 0 0 16px; }
+  .badges { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .badges li { display: flex; gap: 12px; align-items: center; }
+  .medal { flex: none; width: 44px; height: 44px; border-radius: 50%; background: #ffe6a0; border: 2px solid var(--brown); display: grid; place-items: center;
+           font-family: "Gaegu"; font-weight: 700; color: var(--brown); font-size: 20px; }
+  .badges .t { font-weight: 700; } .badges a { color: var(--brown); }
+  .chart { position: relative; height: 240px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 14px; margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 12px; height: 12px; border-radius: 3px; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
+  ul.list li:last-child { border-bottom: 0; }
+  .tag { font-size: 13px; padding: 2px 8px; border-radius: 999px; background: var(--soft); white-space: nowrap; }
+  .tag.ok { background: #d9efe1; color: var(--good); }
+  form.ask { display: flex; gap: 8px; }
+  form.ask input { flex: 1; min-width: 0; font: inherit; font-size: 18px; padding: 12px 14px; border: 2px solid var(--line); border-radius: 12px; background: #fff; }
+  button { font: inherit; cursor: pointer; }
+  .btn { background: var(--brown); color: #fff; border: 0; border-radius: 12px; padding: 0 18px; font-weight: 700; }
+  .qchips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .qchips button { background: var(--soft); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; font-size: 15px; }
+  #answer { font-size: 19px; margin: 14px 0 0; min-height: 1.4em; }
+  #photo { max-width: 360px; width: 100%; border-radius: 12px; margin-top: 10px; border: 1px solid var(--line); }
+  details { margin-top: 6px; } pre { white-space: pre-wrap; font-size: 12px; background: var(--soft); padding: 8px; border-radius: 8px; }
+  .sr-table { position: absolute; left: -9999px; }
+  #lock { position: fixed; inset: 0; background: var(--paper); display: grid; place-items: center; padding: 16px; z-index: 9; }
+  #lock form { background: var(--sheet); border: 1px solid var(--line); border-radius: 18px; padding: 26px; display: grid; gap: 12px; width: min(360px, 100%); text-align: center; }
+  #lock input { font: inherit; font-size: 28px; letter-spacing: .3em; text-align: center; padding: 10px; border: 2px solid var(--line); border-radius: 12px; }
+  #lock .btn { min-height: 48px; }
+</style>
+</head>
+<body>
+<div id="lock" hidden>
+  <form id="lockForm">
+    <h2>Teddy for parents</h2>
+    <label for="pin" class="muted">Enter your parent PIN</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" required>
+    <button class="btn" type="submit">Open</button>
+    <p id="lockMsg" class="muted" aria-live="polite"></p>
+  </form>
+</div>
+
+<div class="wrap">
+  <header>
+    <div>
+      <p class="muted" style="margin:0">Teddy for parents</p>
+      <h1><span id="kid">Your kid</span>'s week with Teddy</h1>
+    </div>
+    <div class="chips" id="sources" aria-label="Where this comes from"></div>
+  </header>
+  <p class="privacy">Feelings here are <b>mood check-ins, not a diagnosis</b>. Teddy saves only a feeling word and the time, never pictures of your child's face. Only you can see this page.</p>
+
+  <div class="grid">
+    <section class="card" aria-labelledby="noteTitle">
+      <h2 id="noteTitle">This week</h2>
+      <p class="note" id="note">Reading Teddy's notes…</p>
+      <small class="muted note-by" id="noteBy"></small>
+    </section>
+
+    <div class="grid wide">
+      <section class="card" aria-labelledby="practiceTitle">
+        <h2 id="practiceTitle">Time practicing</h2>
+        <div class="chart"><canvas id="practiceChart" role="img" aria-label="Minutes practicing each day"></canvas></div>
+        <table class="sr-table" id="practiceTable"></table>
+        <p class="muted" id="practiceBy" style="margin:8px 0 0"></p>
+      </section>
+      <section class="card" aria-labelledby="skillsTitle">
+        <h2 id="skillsTitle">Skills learned</h2>
+        <ul class="badges" id="skills"><li class="muted">Nothing yet this week.</li></ul>
+      </section>
+    </div>
+
+    <section class="card" aria-labelledby="askTitle">
+      <h2 id="askTitle">Ask Teddy</h2>
+      <form class="ask" id="ask"><label for="q" class="sr-table">Your question</label>
+        <input id="q" type="text" placeholder="Where are the keys?" autocomplete="off"><button class="btn" type="submit">Ask</button></form>
+      <div class="qchips" role="group" aria-label="Example questions">
+        <button type="button">Where are the keys?</button><button type="button">Where is the bunny?</button>
+        <button type="button">What did she work on this week?</button><button type="button">When was she frustrated?</button>
+      </div>
+      <p id="answer" aria-live="polite"></p><img id="photo" hidden alt="Where Teddy last saw it (faces blurred)">
+      <details id="how" hidden><summary class="muted">How Teddy found this</summary><div id="howBody"></div></details>
+    </section>
+
+    <div class="grid wide">
+      <section class="card" aria-labelledby="feelTitle">
+        <h2 id="feelTitle">Feelings this week</h2>
+        <div class="chart"><canvas id="feelChart" role="img" aria-label="Mood check-ins per day, by feeling"></canvas></div>
+        <div class="legend" id="legend"></div>
+        <table class="sr-table" id="feelTable"></table>
+      </section>
+      <section class="card" aria-labelledby="upsetTitle">
+        <h2 id="upsetTitle">Upset moments</h2>
+        <ul class="list" id="upsets"><li class="muted">None this week.</li></ul>
+      </section>
+    </div>
+
+    <div class="grid two">
+      <section class="card" aria-labelledby="hwTitle"><h2 id="hwTitle">Homework</h2><ul class="list" id="homework"></ul></section>
+      <section class="card" aria-labelledby="findTitle"><h2 id="findTitle">Things Teddy helped find</h2><ul class="list" id="finds"></ul></section>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const FEELINGS = ['calm', 'happy', 'sad', 'frustrated', 'upset'];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+let pin = ''; try { pin = sessionStorage.getItem('teddy.pin') || ''; } catch {}
+const api = async (path, body) => {
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', 'X-Parent-Pin': pin },
+                                body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { $('#lock').hidden = false; $('#pin').focus(); throw new Error('pin'); }
+  return r.json();
+};
+const when = ts => new Date(String(ts).replace(' ', 'T')).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+const li = (html) => { const el = document.createElement('li'); el.innerHTML = html; return el; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function bars(id, labels, datasets, stacked) {
+  const grid = css('--line'), ink = css('--ink-2');
+  return new Chart($(id), { type: 'bar', data: { labels, datasets: datasets.map(d => ({ borderRadius: 4, maxBarThickness: 34, borderWidth: stacked ? { top: 2 } : 0, borderColor: css('--sheet'), borderSkipped: false, ...d })) },
+    options: { maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: stacked ? {} : { label: c => ` ${c.raw} min` } } },
+      scales: { x: { stacked, grid: { display: false }, ticks: { color: ink } },
+                y: { stacked, beginAtZero: true, grid: { color: grid }, border: { display: false }, ticks: { color: ink, precision: 0 } } } } });
+}
+
+async function load() {
+  const w = await api('/api/parent/week');
+  $('#lock').hidden = true;
+  $('#kid').textContent = w.kid; document.title = `${w.kid}'s week · Teddy`;
+  const src = w.sources;
+  $('#sources').innerHTML = [['Brain', src.brain === 'snowflake' ? 'Snowflake' : 'local'], ['Charts', src.practice === 'tiger' ? 'Tiger Data' : 'Snowflake'],
+    ['Badges', src.badges === 'off' ? 'saved' : 'Solana devnet']].map(([k, v]) => `<span class="chip">${k}: <b>${v}</b></span>`).join('');
+
+  bars('#practiceChart', w.labels, [{ label: 'Minutes', data: w.practice_minutes, backgroundColor: css('--practice') }], false);
+  $('#practiceTable').innerHTML = '<caption>Minutes practicing per day</caption>' + w.labels.map((d, i) => `<tr><th>${d}</th><td>${w.practice_minutes[i]}</td></tr>`).join('');
+  const by = Object.entries(w.practice_by_skill).filter(([, n]) => n > 0);
+  $('#practiceBy').textContent = by.length ? 'Sessions: ' + by.map(([k, n]) => `${k} ×${n}`).join(' · ') : '';
+
+  const skills = $('#skills'); skills.innerHTML = '';
+  const seen = new Set();
+  w.skills.forEach(s => {
+    const key = s.badge + s.skill; const again = seen.has(key); seen.add(key);
+    skills.append(li(`<span class="medal" aria-hidden="true">★</span><div><div class="t">${esc(s.badge)}${again ? ' <span class="tag">again</span>' : ''}</div>
+      <div class="muted">${esc(s.skill)} · ${when(s.when)}${s.minutes ? ` · ${s.minutes} min` : ''}${s.solana ? ` · <a href="${esc(s.solana)}" target="_blank" rel="noopener">on Solana ↗</a>` : ''}</div></div>`));
+  });
+  if (!w.skills.length) skills.append(li('<span class="muted">Nothing finished yet this week.</span>'));
+
+  const colors = Object.fromEntries(FEELINGS.map(f => [f, css('--' + f)]));
+  bars('#feelChart', w.labels, FEELINGS.map(f => ({ label: f, data: w.feelings[f], backgroundColor: colors[f] })), true);
+  $('#legend').innerHTML = FEELINGS.map(f => `<span><i style="background:${colors[f]}"></i>${f}</span>`).join('');
+  $('#feelTable').innerHTML = '<caption>Mood check-ins per day</caption><tr><th>Day</th>' + FEELINGS.map(f => `<th>${f}</th>`).join('') + '</tr>' +
+    w.labels.map((d, i) => `<tr><th>${d}</th>${FEELINGS.map(f => `<td>${w.feelings[f][i]}</td>`).join('')}</tr>`).join('');
+
+  const up = $('#upsets'); up.innerHTML = '';
+  w.upsets.forEach(u => up.append(li(`<div><b>${esc(u.feeling)}</b> for ${u.seconds}s <div class="muted">while ${esc(u.helping_with || 'hanging out')}</div></div>
+    <div style="text-align:right"><div>${when(u.when)}</div>${u.checked_in ? '<span class="tag ok">Teddy checked in</span>' : ''}</div>`)));
+  if (!w.upsets.length) up.append(li('<span class="muted">None this week.</span>'));
+
+  const hw = $('#homework'); hw.innerHTML = '';
+  w.homework.forEach(h => hw.append(li(`<span>${esc(h.question)}</span><span class="tag ${h.done ? 'ok' : ''}">${h.done ? 'figured it out' : 'working on it'} · ${h.tries} tr${h.tries === 1 ? 'y' : 'ies'}</span>`)));
+  if (!w.homework.length) hw.append(li('<span class="muted">No homework this week.</span>'));
+  const fd = $('#finds'); fd.innerHTML = '';
+  Object.entries(w.finds).forEach(([o, n]) => fd.append(li(`<span>${esc(o)}</span><span class="tag">${n}×</span>`)));
+  if (!Object.keys(w.finds).length) fd.append(li('<span class="muted">Nothing lost this week!</span>'));
+
+  api('/api/parent/insight').then(r => { $('#note').textContent = r.text || 'Teddy will write a note once there is a bit more to share.';
+    $('#noteBy').textContent = r.by ? `Written by ${r.by} from Teddy's log.` : ''; }).catch(() => {});
+}
+
+async function ask(q) {
+  $('#q').value = q; $('#answer').textContent = 'Asking Teddy…'; $('#photo').hidden = true; $('#how').hidden = true;
+  try {
+    const r = await api('/api/parent/ask', { question: q });
+    $('#answer').textContent = r.answer;
+    if (r.photo) { $('#photo').src = r.photo; $('#photo').hidden = false; }
+    $('#howBody').innerHTML = `<p class="muted">${esc(r.engine)}</p>${r.sql ? `<pre>${esc(r.sql)}</pre>` : ''}`; $('#how').hidden = false;
+  } catch (e) { if (e.message !== 'pin') $('#answer').textContent = "Couldn't reach Teddy's memory right now."; }
+}
+$('#ask').addEventListener('submit', e => { e.preventDefault(); const q = $('#q').value.trim(); if (q) ask(q); });
+document.querySelectorAll('.qchips button').forEach(b => b.addEventListener('click', () => ask(b.textContent)));
+$('#lockForm').addEventListener('submit', async e => {
+  e.preventDefault(); pin = $('#pin').value.trim(); try { sessionStorage.setItem('teddy.pin', pin); } catch {}
+  $('#lockMsg').textContent = ''; try { await load(); } catch { $('#lockMsg').textContent = 'That PIN didn’t work.'; }
+});
+load().catch(() => {});
+</script>
+</body>
+</html>
