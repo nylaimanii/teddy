@@ -3,7 +3,7 @@ never the demo. `python -m brain.flags` prints what's on.
 
     Snowflake   SNOWFLAKE_ACCOUNT/USER/PASSWORD      brain, how-to + homework knowledge, parent insights
     Tiger Data  TIGER_DATABASE_URL (postgres://...)  time-series log of sessions, skills, finds, moods
-    Solana      solana + spl-token CLIs, keypair     devnet "skill badge" per finished how-to
+    Solana      data/solana/*.json keypairs (setup)  devnet "skill badge" per finished how-to
     ElevenLabs  ELEVENLABS_API_KEY                   Teddy's voice (browser speech otherwise)
     Gemini      GEMINI_API_KEY                       vision fallback (used by senses/)
     Vultr       VULTR_API_KEY or PARENT_HOST         where the Parent dashboard + API are deployed
@@ -39,7 +39,7 @@ def tiger():
 
 
 def solana():
-    return _on("solana") and bool(shutil.which("spl-token")) and SOLANA_KEYPAIR.exists()
+    return _on("solana") and SOLANA_KEYPAIR.exists()  # minting is pure Python (solana-py), no CLI needed
 
 
 def elevenlabs():
