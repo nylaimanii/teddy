@@ -20,7 +20,7 @@ import time
 from collections import deque
 from fractions import Fraction
 
-from brain import activity, badges, flags, howto, screen, tutor
+from brain import activity, badges, flags, howto, mood, screen, tutor
 from brain import snowflake as sf
 from brain.mocks import MockBody, MockVision, MockVoice
 
@@ -200,8 +200,9 @@ class Teddy:
         self.mic = voice or load_voice(mock)
         # On the iPad setup Teddy's voice plays on the screen; the Mac only listens.
         self.voice = screen.ScreenVoice(mic=self.mic, fallback=self.mic) if screen_voice else self.mic
-        self.wake_word = (os.getenv("TEDDY_WAKE", "teddy") if wake_word is None else wake_word) \
-            if not isinstance(self.mic, MockVoice) else ""
+        # senses.voice.wait_for_wake() owns "hey Teddy" now; the old in-text check is only for older mics
+        self.wake_word = "" if (isinstance(self.mic, MockVoice) or hasattr(self.mic, "wait_for_wake")) else \
+            (os.getenv("TEDDY_WAKE", "teddy") if wake_word is None else wake_word)
         if not isinstance(self.vision, MockVision) and hasattr(self.vision, "frame"):
             sf.set_frame_source(self.vision.frame)
         self.history = deque(maxlen=8)
@@ -215,6 +216,9 @@ class Teddy:
         self._last_spoke = 0
         self._last_gesture = {}
         self._fall_cooldown = 0
+        self._checkin = threading.Event()      # a gentle mood check-in is happening
+        self._checkin_done = threading.Event()  # kid tapped "I'm okay"
+        self._cpr_active = False
         self._running = True
         threading.Thread(target=self._worker, daemon=True, name="teddy-actions").start()
 
@@ -311,6 +315,9 @@ class Teddy:
         text = (text or "").strip()
         if not text:
             return None
+        if self._checkin.is_set():  # "I'm okay" during a breathing check-in ends it, nothing else
+            self._checkin_done.set()
+            return {"checkin": True}
         if source != "voice" and self.answer(text):
             return {"answered": True}
         if self.wake_word and source == "voice" and time.time() - self._last_spoke > 12:
@@ -456,7 +463,8 @@ class Teddy:
             screen.show("idle")
             return self.say("I can't make out the words. Can you hold it a little closer and still?")
         screen.show("read", text=text, frame=(f := sf.save_frame(tag="read")) and f"/frames/{f}")
-        return self.say(text)
+        activity.log("read", words=len(text.split()))
+        return self.say(text, mood="reading")
 
     def do_story(self, question=None, **_):
         topic = ""
@@ -806,17 +814,30 @@ class Teddy:
 
     # ---- background loops
     def _voice_loop(self):
+        """Asleep until "hey Teddy" (senses.voice.wait_for_wake); mid-conversation answers need no wake word."""
         self._voice_loop_on = True
+        wake = getattr(self.mic, "wait_for_wake", None)
         while self._running:
             t0 = time.time()
             try:
-                text = self.mic.listen(5)
+                if self._awaiting.is_set() or not wake:
+                    text = self.mic.listen(12 if self._awaiting.is_set() else 5)
+                else:
+                    text = wake(timeout=2)
+                    if text is None:
+                        continue
+                    screen.update(face="listening")
+                    self._pose("listening", "listen")
+                    if not text:  # "hey Teddy" on its own: now listen for the request
+                        text = self.mic.listen(8)
+                    if not text:
+                        continue
             except Exception as e:
                 print(f"[teddy] listen failed: {e}")
                 time.sleep(1)
                 continue
-            # Drop anything recorded while Teddy was talking (the iPad speaker is right next to the mic).
-            if not text or self._talking or self._last_spoke > t0 - 0.3:
+            # Drop anything recorded while Teddy was talking or breathing with the kid.
+            if not text or self._talking or self._checkin.is_set() or self._last_spoke > t0 - 0.3:
                 continue
             if self._awaiting.is_set():
                 self._answers.put(text)
@@ -824,6 +845,37 @@ class Teddy:
                 if not self.wake_word or self.wake_word in text.lower() or time.time() - self._last_spoke < 12:
                     sf.log_event("heard", {"text": text, "source": "voice"})
                 self.hear(text, "voice")
+
+    # ---- mood check-ins (labels only; senses keeps the face)
+    def _mood_loop(self):
+        tracker = mood.UpsetTracker()
+        while self._running:
+            time.sleep(1)
+            m = self._safe(self.vision.mood) if hasattr(self.vision, "mood") else None
+            label = mood.record(m["label"], m.get("conf")) if m else None
+            if tracker.update(label) == "checkin" and not self._cpr_active and not self._checkin.is_set():
+                threading.Thread(target=self._gentle_checkin, args=(label,), daemon=True).start()
+
+    def _gentle_checkin(self, feeling):
+        """Upset for 10+ s: a soft check-in and a breathing buddy. Never names or diagnoses the feeling."""
+        for _ in range(50):  # let him finish his sentence first
+            if not self._talking:
+                break
+            time.sleep(0.2)
+        self._checkin.set()
+        self._checkin_done.clear()
+        activity.log("mood_checkin", feeling=feeling, helping_with=activity.current() or "hanging out")
+        try:
+            screen.publish({"type": "breathe", "on": True})
+            self.say("Hey buddy, you okay? Wanna take a big breath with me?", mood="calm")
+            self._pose("breathe", "neutral")  # loops 4 s in / 4 s out until stopped
+            self._checkin_done.wait(timeout=26)  # three slow breaths, or until "I'm okay"
+            self._safe(self.body.stop)
+            self._pose("neutral")
+            screen.publish({"type": "breathe", "on": False})
+            self.say("Nice breathing. I'm right here with you.", mood="calm")
+        finally:
+            self._checkin.clear()
 
     def _gesture_loop(self):
         while self._running:
@@ -864,7 +916,7 @@ class Teddy:
 
     def start(self, voice=True):
         """Start the always-on loops (voice, gestures, fall watch). Returns immediately."""
-        loops = [self._gesture_loop] + ([] if flags.KID else [self._fall_loop])
+        loops = [self._gesture_loop, self._mood_loop] + ([] if flags.KID else [self._fall_loop])
         if voice and not (isinstance(self.mic, MockVoice) and not self.mic.interactive):
             loops.append(self._voice_loop)
         for fn in loops:

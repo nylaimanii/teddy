@@ -14,6 +14,7 @@ class Vision(cam_index=0, mock=False):
   identify() -> str; read_text() -> str; person_fallen() -> bool
   gestures() -> {"type": wave|point|come_here|thumbs_up, "x","y"} | None
   vitals() -> {"heart_rate","breathing_rate"} or {}
+  mood() -> {"label","conf","ts"} | None   # label: happy|sad|angry|surprised|neutral|fearful; labels only, no images
   background loop calls brain.snowflake.log_sighting(label, x, y)
 voice.py: listen(seconds=5) -> str;  speak(text, mood="warm")
 

@@ -43,7 +43,8 @@ OFFLINE = "--offline" in sys.argv or os.getenv("TEDDY_OFFLINE") == "1"  # local 
 VOICE_ID = os.getenv("TEDDY_VOICE_ID", "XrExE9yKIg1WjnnlVkGX")  # Matilda
 TTS_MODEL = "eleven_flash_v2_5"
 MOODS = {"warm": (0.55, 0.35), "happy": (0.35, 0.6), "calm": (0.75, 0.15), "sad": (0.7, 0.3),
-         "alert": (0.4, 0.5), "urgent": (0.4, 0.5)}  # stability, style (same feel as senses/voice.py)
+         "alert": (0.4, 0.5), "urgent": (0.4, 0.5), "reading": (0.7, 0.15)}  # stability, style (as senses/voice.py)
+SPEED = {"reading": 0.75, "calm": 0.9}  # read-aloud is slow so kids can follow along
 
 app = FastAPI(title="Teddy")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -244,7 +245,7 @@ def tts(sid: str):
         headers={"xi-api-key": key, "Content-Type": "application/json"},
         json={"text": p["text"], "model_id": TTS_MODEL,
               "voice_settings": {"stability": stability, "similarity_boost": 0.75, "style": style,
-                                 "use_speaker_boost": True}},
+                                 "use_speaker_boost": True, "speed": SPEED.get(p["mood"], 1.0)}},
         stream=True, timeout=20)
     if r.status_code != 200:
         print(f"[web] ElevenLabs {r.status_code}: {r.text[:200]}")

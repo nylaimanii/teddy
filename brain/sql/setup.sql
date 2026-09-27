@@ -54,3 +54,13 @@ CREATE STAGE IF NOT EXISTS FRAMES
 
 -- Cortex Analyst semantic model.
 CREATE STAGE IF NOT EXISTS MODELS ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE');
+
+-- Mood check-ins: a feeling label + time, never an image. Parent-only.
+CREATE TABLE IF NOT EXISTS MOODS (
+  TS       TIMESTAMP_NTZ,
+  KID      STRING,
+  LABEL    STRING,   -- calm | happy | sad | frustrated | upset
+  RAW      STRING,   -- what senses/ reported (neutral, angry, ...)
+  CONF     FLOAT,
+  ACTIVITY STRING    -- what Teddy was helping with at the time
+);
