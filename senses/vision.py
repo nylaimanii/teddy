@@ -47,6 +47,9 @@ TRACKED_PROMPTS = [
     ("remote", "remote control"),
     ("water bottle", "water bottle"),
     ("backpack", "backpack"),
+    ("backpack", "school bag"),
+    ("shoes", "shoe"),
+    ("shoes", "sneaker"),
     ("book", "book"),
     ("bunny", "white stuffed bunny"),
     ("bunny", "stuffed animal"),
@@ -64,6 +67,8 @@ SYNONYMS = {
     "bottle": "water bottle", "water": "water bottle", "cup": "water bottle",
     "stuffed bunny": "bunny", "white stuffed animal": "bunny", "stuffed animal": "bunny", "rabbit": "bunny",
     "bunny rabbit": "bunny", "white bunny": "bunny", "stuffed rabbit": "bunny", "plushie": "bunny",
+    "shoe": "shoes", "sneaker": "shoes", "sneakers": "shoes", "trainers": "shoes", "boots": "shoes",
+    "boot": "shoes", "sandals": "shoes", "slippers": "shoes",
     "bag": "backpack", "school bag": "backpack", "bookbag": "backpack", "books": "book",
 }
 DETECT_CONF = 0.15
@@ -267,19 +272,47 @@ def _emotion_models():
         return _models["emotion"]
 
 
-def _face_emotion(img):
-    """probs over MOODS for the biggest face in img, or None. Nothing is written to disk."""
+def _faces(img):
+    """YuNet face boxes [(x, y, w, h)] in pixels, biggest first ([] if none or model unavailable)."""
     models = _emotion_models()
     if img is None or models is None:
-        return None
-    det, sess, lock = models
+        return []
+    det, _, lock = models
     h, w = img.shape[:2]
     with lock:
         det.setInputSize((w, h))
         _, faces = det.detect(img)
     if faces is None:
+        return []
+    return sorted((tuple(f[:4]) for f in faces), key=lambda b: -b[2] * b[3])
+
+
+def blur_faces_in(img):
+    """Copy of img with every face heavily pixelated (padded box)."""
+    out = img.copy()
+    h, w = out.shape[:2]
+    for fx, fy, fw, fh in _faces(img):
+        pad = 0.25 * fw
+        x1, y1 = int(max(0, fx - pad)), int(max(0, fy - pad))
+        x2, y2 = int(min(w, fx + fw + pad)), int(min(h, fy + fh + 1.5 * pad))
+        if x2 - x1 < 2 or y2 - y1 < 2:
+            continue
+        small = cv2.resize(out[y1:y2, x1:x2], (6, 6), interpolation=cv2.INTER_AREA)
+        out[y1:y2, x1:x2] = cv2.resize(small, (x2 - x1, y2 - y1), interpolation=cv2.INTER_NEAREST)
+    return out
+
+
+def _face_emotion(img):
+    """probs over MOODS for the biggest face in img, or None. Nothing is written to disk."""
+    models = _emotion_models()
+    if img is None or models is None:
         return None
-    fx, fy, fw, fh = max(faces, key=lambda f: f[2] * f[3])[:4]
+    _, sess, lock = models
+    faces = _faces(img)
+    if not faces:
+        return None
+    h, w = img.shape[:2]
+    fx, fy, fw, fh = faces[0]
     if fw < 36:  # too far away to read an expression
         return None
     pad = 0.15 * fw
@@ -416,10 +449,12 @@ class Vision:
         if self._frame is None:
             _log("WARNING: no frames yet from", self.source)
 
-    def frame(self):
-        """Latest BGR frame (numpy array) or None."""
+    def frame(self, blur_faces=False):
+        """Latest BGR frame (numpy array) or None. blur_faces=True pixelates every face first:
+        use that for anything that gets saved or shown."""
         with self._lock:
-            return None if self._frame is None else self._frame.copy()
+            f = None if self._frame is None else self._frame.copy()
+        return blur_faces_in(f) if blur_faces and f is not None else f
 
     def close(self):
         self._running = False
@@ -475,7 +510,7 @@ class Vision:
             return None
         hit = hits[0]
         if save:
-            hit["image"] = str(_save_boxed(img, hit))
+            hit["image"] = str(_save_boxed(blur_faces_in(img), hit))  # never save a face
         return hit
 
     def _sighting_loop(self, every=2.0):

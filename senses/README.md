@@ -11,6 +11,7 @@ from senses.vision import Vision
 from senses import voice
 v = Vision()                                   # TEDDY_CAM=<index> picks the webcam
 v = Vision(mock=True, source="some.jpg|.mp4")  # no hardware
+v.frame(blur_faces=True)   # use this for anything saved or shown; find() snapshots are always face-blurred
 v.detect(); v.gestures()
 v.person_fallen()   # always False unless Vision(fall_detection=True) or TEDDY_FALLS=1
 v.mood()            # {"label": happy|sad|angry|surprised|neutral|fearful, "conf", "ts"} or None; 5 s smoothed

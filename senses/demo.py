@@ -19,6 +19,7 @@ results = []
 
 
 def check(name, ok, got, secs=None):
+    ok = bool(ok)
     results.append((name, ok))
     t = f" ({secs:.2f}s)" if secs is not None else ""
     print(f"{'PASS' if ok else 'FAIL'}  {name}{t}: {got}", flush=True)
@@ -122,6 +123,19 @@ def test_mood():
     v.close()
 
 
+def test_blur():
+    import cv2
+    v = Vision(mock=True, source=A / "zidane.jpg", log_sightings=False, background=False)
+    raw, blurred = v.frame(), v.frame(blur_faces=True)
+    face_left = vision._faces(raw)
+    check("frame(blur_faces=True) hides faces", face_left and not vision._faces(blurred), (len(face_left), len(vision._faces(blurred))))
+    hit = v.find("person")
+    left = [f for f in vision._faces(cv2.imread(hit["image"]))
+            if any(abs(f[0] - o[0]) < o[2] / 2 and abs(f[1] - o[1]) < o[3] / 2 for o in face_left)]
+    check("find() snapshot: original faces unreadable", hit and not left, left)
+    v.close()
+
+
 def test_wake():
     voice.set_mock(True, audio_file=A / "hey_teddy.wav")
     r = voice.wait_for_wake()
@@ -216,7 +230,7 @@ def watch(seconds=180):
 
 
 TESTS = {"detect": test_detect, "point": test_point, "fallen": test_fallen, "gestures": test_motion_gestures,
-         "vlm": test_vlm, "mood": test_mood, "wake": test_wake, "sightings": test_sightings, "vitals": test_vitals, "voice": test_voice}
+         "vlm": test_vlm, "mood": test_mood, "blur": test_blur, "wake": test_wake, "sightings": test_sightings, "vitals": test_vitals, "voice": test_voice}
 
 if __name__ == "__main__":
     args = sys.argv[1:]
