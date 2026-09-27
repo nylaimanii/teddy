@@ -1,0 +1,4 @@
+# Vercel only needs the static pages + build script; keep the FastAPI server out of it
+*.py
+__pycache__/
+qr.png

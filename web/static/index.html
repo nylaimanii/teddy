@@ -28,7 +28,19 @@
   #wakeBtn { background: var(--yellow); color: #000; font-size: 40px; font-weight: 800; padding: 28px 56px; border-radius: 999px;
              min-width: min(520px, 90vw); box-shadow: 0 10px 40px rgba(255,214,10,.35); }
   #wake p { color: var(--muted); max-width: 520px; margin: 0; }
-  #remoteBtn { background: transparent; color: var(--blue); text-decoration: underline; font-size: 18px; padding: 12px; }
+  #remoteBtn, .linkish { background: transparent; color: var(--blue); text-decoration: underline; font-size: 18px; padding: 12px; }
+  #awakeBox, #sleepBox { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+  #awakeBox[hidden], #sleepBox[hidden], #checking[hidden] { display: none; }
+  #wake.checking #awakeBox { display: none; }
+  .sleep-title { font-size: 40px; margin: 0; }
+  #demoBtn { background: var(--yellow); color: #000; font-size: 32px; font-weight: 800; padding: 22px 48px; border-radius: 999px; min-width: min(480px, 90vw); }
+  .addr { color: var(--muted); font-size: 17px; } .addr summary { cursor: pointer; padding: 8px; }
+  .addr form { display: flex; gap: 8px; margin-top: 8px; }
+  .addr input { font: inherit; font-size: 17px; padding: 10px 12px; border-radius: 12px; border: 2px solid #fff; background: #000; color: #fff; width: min(340px, 60vw); }
+  .addr button { background: #fff; color: #000; border-radius: 12px; padding: 0 16px; }
+  #woke { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 60; }
+  #woke button { background: var(--green); color: #000; font-size: 20px; font-weight: 800; padding: 14px 24px; border-radius: 999px; }
+  .demo-flag { background: var(--yellow); color: #000; font-size: 14px; font-weight: 800; padding: 4px 10px; border-radius: 999px; }
   body.awake #wake { display: none; }
 
   /* ---------- top bar ---------- */
@@ -151,17 +163,32 @@
 </style>
 </head>
 <body>
-<div id="wake" role="dialog" aria-modal="true" aria-labelledby="wakeBtn">
-  <div class="bear" aria-hidden="true">🧸</div>
-  <button id="wakeBtn" type="button">Wake Teddy 🧸</button>
-  <p>Tap once so Teddy can talk through this screen.</p>
-  <button id="remoteBtn" type="button">Use as a remote (no sound)</button>
+<div id="wake" role="dialog" aria-modal="true" aria-labelledby="wakeTitle">
+  <div class="bear" aria-hidden="true" id="wakeBear">🧸</div>
+  <div id="awakeBox">
+    <h1 id="wakeTitle" class="sr">Teddy</h1>
+    <button id="wakeBtn" type="button">Wake Teddy 🧸</button>
+    <p>Tap once so Teddy can talk through this screen.</p>
+    <button id="remoteBtn" type="button">Use as a remote (no sound)</button>
+  </div>
+  <div id="sleepBox" hidden>
+    <h1 class="sleep-title">Teddy is sleeping</h1>
+    <p>His computer is offline right now. You can still see what he does.</p>
+    <button id="demoBtn" type="button">Watch a demo 🧸</button>
+    <button id="retryBtn" type="button" class="linkish">Try waking him again</button>
+    <details class="addr"><summary>Teddy's address</summary>
+      <form id="addrForm"><label class="sr" for="addr">Teddy's address</label>
+        <input id="addr" type="url" inputmode="url" placeholder="https://….trycloudflare.com" autocomplete="off">
+        <button type="submit">Connect</button></form></details>
+  </div>
+  <p id="checking">Looking for Teddy…</p>
 </div>
+<div id="woke" hidden role="alert"><button type="button" onclick="location.reload()">🧸 Teddy woke up! Tap to connect</button></div>
 
 <header>
   <nav class="tabs" aria-label="Pages">
-    <a href="/" aria-current="page"><span aria-hidden="true">🧸</span> Teddy</a>
-    <a href="/caregiver"><span aria-hidden="true">📊</span> Caregiver</a>
+    <a href="/teddy" data-link aria-current="page"><span aria-hidden="true">🧸</span> Teddy</a>
+    <a href="/caregiver" data-link><span aria-hidden="true">📊</span> Caregiver</a>
   </nav>
   <div id="pill" role="status"><span class="dot" aria-hidden="true"></span><span id="pillText">Connecting…</span></div>
 </header>
@@ -212,12 +239,16 @@
   <button type="button" id="findClose" class="stopbig" style="margin-top:14px;width:100%">Cancel</button>
 </dialog>
 
+<script src="/config.js"></script>
+<script src="/teddy-api.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-const act = (intent, extra = {}) => { navigator.vibrate?.(30); return post('/api/action', { intent, ...extra }); };
-const tell = text => post('/api/say', { text });
+const post = (p, body) => TEDDY.post(p, body).catch(() => {});
+const asset = u => (!u || /^(https?:|data:|\/demo\/)/.test(u)) ? u : TEDDY.url(u);  // frames/audio live on the Mac
+let DEMO = false;
+const act = (intent, extra = {}) => { navigator.vibrate?.(30); return DEMO ? Demo.play(intent, extra) : post('/api/action', { intent, ...extra }); };
+const tell = text => DEMO ? Demo.tell(text) : post('/api/say', { text });
 let speaker = false, es = null, S = { mode: 'idle' }, idleTimer = null;
 
 /* ---------------- audio: every word Teddy says plays here ---------------- */
@@ -241,16 +272,17 @@ function nextSay() {
   const m = sayQueue.shift();
   if (!m) { talking = false; setPill(); hideSubs(); return; }
   talking = true; setPill(); showSubs(m.text);
-  if (!speaker) { setTimeout(nextSay, Math.min(9000, 800 + m.text.length * 60)); return; }
+  if (!speaker) { setTimeout(() => { m.resolve?.(); nextSay(); }, Math.min(9000, 800 + m.text.length * 60)); return; }
   let finished = false;
-  const done = () => { if (finished) return; finished = true; post('/api/spoken/' + m.id); nextSay(); };
+  const done = () => { if (finished) return; finished = true; if (!DEMO) post('/api/spoken/' + m.id); m.resolve?.(); nextSay(); };
+  if (DEMO) { fallbackVoice(m, done); return; }
   audio.onended = done;
   audio.onerror = () => fallbackVoice(m, done);
-  audio.src = m.audio || ('/api/tts/' + m.id);
+  audio.src = asset(m.audio || ('/api/tts/' + m.id));
   audio.play().catch(() => fallbackVoice(m, done));
 }
 function hush() {
-  sayQueue.length = 0; audio.pause(); audio.onended = audio.onerror = null;
+  sayQueue.forEach(m => m.resolve?.()); sayQueue.length = 0; audio.pause(); audio.onended = audio.onerror = null;
   try { speechSynthesis.cancel(); } catch {}
   talking = false; setPill(); hideSubs();
 }
@@ -275,7 +307,7 @@ const online = on => { $('#pill').classList.toggle('off', !on); if (on) setPill(
 function connect() {
   es?.close();
   let got = false;
-  es = new EventSource('/api/stream' + (speaker ? '?speaker=1' : ''));
+  es = new EventSource(TEDDY.url('/api/stream' + (speaker ? '?speaker=1' : '')));
   es.onopen = () => online(true);
   es.onerror = () => online(false);
   es.onmessage = e => { got = true; handle(JSON.parse(e.data)); };
@@ -287,7 +319,7 @@ async function pollLoop() {
   let after = -1;
   for (;;) {
     try {
-      const r = await fetch(`/api/poll?after=${after}&speaker=${speaker ? 1 : 0}&cid=${CID}`, { cache: 'no-store' });
+      const r = await fetch(TEDDY.url(`/api/poll?after=${after}&speaker=${speaker ? 1 : 0}&cid=${CID}`), { cache: 'no-store' });
       const j = await r.json(); online(true);
       after = j.seq; j.msgs.forEach(handle);
     } catch { online(false); await new Promise(r => setTimeout(r, 2000)); }
@@ -296,6 +328,7 @@ async function pollLoop() {
 let listening = false;
 function setPill() {
   const p = $('#pill'); p.classList.toggle('listening', listening && !talking); p.classList.toggle('speaking', talking);
+  if (DEMO) { $('#pill').classList.toggle('speaking', talking); return; }
   $('#pillText').textContent = talking ? 'Teddy is talking' : listening ? 'Listening…' : (speaker ? 'Ready' : 'Remote');
 }
 function showSubs(t) { const s = $('#subs'); s.innerHTML = '<b>Teddy:</b> ' + esc(t); s.classList.add('on'); }
@@ -344,10 +377,10 @@ function render(m) {
     case 'dance':
       sc.innerHTML = `<div class="dance" aria-hidden="true"><span>🎵</span><span>🧸</span><span>🎶</span></div><div class="caption">Dance party!</div>${stop}`; break;
     case 'read':
-      sc.innerHTML = `${m.frame ? `<div class="shot" style="max-width:420px"><img src="${esc(m.frame)}" alt="What Teddy is reading"></div>` : ''}
+      sc.innerHTML = `${m.frame ? `<div class="shot" style="max-width:420px"><img src="${esc(asset(m.frame))}" alt="What Teddy is reading"></div>` : ''}
         <div class="card">${esc(m.text)}</div>`; break;
     case 'identify':
-      sc.innerHTML = `${m.frame ? `<div class="shot"><img src="${esc(m.frame)}" alt="What Teddy sees"></div>` : '<div class="bigbear" aria-hidden="true">👀</div>'}
+      sc.innerHTML = `${m.frame ? `<div class="shot"><img src="${esc(asset(m.frame))}" alt="What Teddy sees"></div>` : '<div class="bigbear" aria-hidden="true">👀</div>'}
         <div class="caption">That's ${esc(m.thing)}!</div>`; announce("That's " + m.thing); break;
     case 'answer':
       sc.innerHTML = `<div class="caption" style="font-size:24px;color:var(--muted)">${esc(m.question || m.title)}</div>
@@ -387,7 +420,7 @@ function findView(m) {
       const w = m.box.w || 0.14, h = m.box.h || 0.14;
       box = `<div class="box" style="left:${(m.box.x - w / 2) * 100}%;top:${(m.box.y - h / 2) * 100}%;width:${w * 100}%;height:${h * 100}%"></div>`;
     }
-    shot = `<div class="shot"><img src="${esc(m.frame)}" alt="Camera picture with your ${esc(m.object)} marked">${box}</div>`;
+    shot = `<div class="shot"><img src="${esc(asset(m.frame))}" alt="Camera picture with your ${esc(m.object)} marked">${box}</div>`;
   } else if (m.status !== 'looking') shot = '<div class="bigbear" aria-hidden="true">🔍</div>';
   else shot = '<div class="bigbear" aria-hidden="true">🧸</div>';
   return `<span class="badge ${badge[0]}">${esc(badge[1])}</span>${shot}<div class="caption">${esc(m.caption || '')}</div>`;
@@ -419,13 +452,39 @@ $('#findOther').addEventListener('submit', e => { e.preventDefault(); const v = 
 $('#talk').addEventListener('submit', e => { e.preventDefault(); const v = $('#talkText').value.trim(); if (v) { tell(v); $('#talkText').value = ''; } });
 $('#wakeBtn').addEventListener('click', () => wake(true));
 $('#remoteBtn').addEventListener('click', () => wake(false));
+$('#demoBtn').addEventListener('click', () => startDemo());
+$('#retryBtn').addEventListener('click', () => boot());
+$('#addrForm').addEventListener('submit', e => { e.preventDefault(); const v = $('#addr').value.trim(); if (v) { TEDDY.remember(v); boot(); } });
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (SR) {
   const mic = $('#mic'); mic.hidden = false;
   mic.addEventListener('click', () => { const r = new SR(); r.lang = 'en-US'; r.onresult = ev => tell(ev.results[0][0].transcript); r.start(); });
 }
 render({ mode: 'idle' });
-$('#wakeBtn').focus();
+
+async function boot() {
+  $('#wake').classList.add('checking'); $('#checking').hidden = false; $('#sleepBox').hidden = true;
+  const base = await TEDDY.connect();
+  $('#checking').hidden = true; $('#wake').classList.remove('checking');
+  document.querySelectorAll('a[data-link]').forEach(a => a.href = TEDDY.link(a.getAttribute('href')));
+  if (base !== null) { $('#awakeBox').hidden = false; $('#wakeBtn').focus(); return; }
+  $('#awakeBox').hidden = true; $('#sleepBox').hidden = false; $('#wakeBear').textContent = '😴';
+  $('#demoBtn').focus();
+  watchForWake();
+}
+function watchForWake() {  // while asleep/demo, notice when the Mac comes back
+  const t = setInterval(async () => { if (await TEDDY.connect() !== null) { clearInterval(t); $('#woke').hidden = false; } }, 20000);
+}
+function startDemo() {
+  DEMO = true; speaker = true;
+  try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch {}
+  document.body.classList.add('awake');
+  $('#pill').classList.remove('off'); $('#pillText').innerHTML = '<span class="demo-flag">DEMO</span> Teddy is sleeping';
+  render({ mode: 'idle' });
+  Demo.say("Hi! I'm Teddy. My computer is asleep, so this is a pretend demo. Tap a button to see what I can do!");
+}
+boot();
 </script>
+<script src="/demo/demo.js"></script>
 </body>
 </html>

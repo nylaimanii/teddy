@@ -13,6 +13,8 @@ import qrcode
 import requests
 
 PORT = int(os.getenv("PORT", "8000"))
+# If the pages are on Vercel, the QR opens them there with ?api=<this tunnel> so they find the Mac.
+VERCEL = os.getenv("TEDDY_VERCEL_URL", "").rstrip("/")
 OUT = Path(__file__).parent / "qr.png"
 
 
@@ -28,10 +30,15 @@ def main():
         m = re.search(r"https://[a-z0-9-]+\.trycloudflare\.com", line)
         if m and not url:
             url = m.group(0)
+            target = f"{VERCEL}/teddy?api={url}" if VERCEL else url
             qr = qrcode.QRCode(border=2, box_size=14, error_correction=qrcode.constants.ERROR_CORRECT_M)
-            qr.add_data(url)
+            qr.add_data(target)
             qr.make_image(fill_color="black", back_color="white").save(OUT)
-            print(f"\n  Teddy's screen: {url}\n  Caregiver:      {url}/caregiver\n  QR code:        {OUT}\n", flush=True)
+            if VERCEL:
+                print(f"\n  API (tunnel):   {url}\n  Teddy's screen: {target}\n"
+                      f"  Caregiver:      {VERCEL}/caregiver?api={url}\n  QR code:        {OUT} -> Vercel screen\n", flush=True)
+            else:
+                print(f"\n  Teddy's screen: {url}\n  Caregiver:      {url}/caregiver\n  QR code:        {OUT}\n", flush=True)
             if sys.platform == "darwin" and "--no-open" not in sys.argv:
                 subprocess.run(["open", str(OUT)])
             print("  (tunnel running, Ctrl+C to stop; takes ~10s before the URL answers)")

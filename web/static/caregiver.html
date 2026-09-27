@@ -62,6 +62,10 @@
   .alert .when { color: var(--text-secondary); font-size: 13px; }
   #live li { font-size: 14px; }
   table.sr-table { position: absolute; left: -9999px; }
+  .sleeping { display: flex; gap: 12px; align-items: center; background: var(--warning-bg); border-left: 4px solid var(--warning);
+              border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; }
+  .sleeping[hidden] { display: none; }
+  .sleeping > span { font-size: 28px; }
   nav.tabs { display: inline-flex; gap: 6px; background: var(--surface-1); border: 1px solid var(--line); border-radius: 999px; padding: 4px; margin-bottom: 14px; }
   nav.tabs a { color: var(--text-primary); padding: 8px 16px; border-radius: 999px; text-decoration: none; font-weight: 600; }
   nav.tabs a[aria-current="page"] { background: var(--series-1); color: #fff; }
@@ -70,13 +74,18 @@
 <body>
 <div class="wrap">
   <nav class="tabs" aria-label="Pages">
-    <a href="/"><span aria-hidden="true">🧸</span> Teddy</a>
-    <a href="/caregiver" aria-current="page"><span aria-hidden="true">📊</span> Caregiver</a>
+    <a href="/teddy" data-link><span aria-hidden="true">🧸</span> Teddy</a>
+    <a href="/caregiver" data-link aria-current="page"><span aria-hidden="true">📊</span> Caregiver</a>
   </nav>
   <header>
     <h1><span aria-hidden="true">🧸</span> <span id="owner">Teddy</span>'s week <small>Caregiver dashboard</small></h1>
     <span class="badge" id="engine">Brain: <b>…</b></span>
   </header>
+  <div id="sleeping" class="sleeping" role="status" hidden>
+    <span aria-hidden="true">😴</span>
+    <div><b>Teddy is sleeping.</b> His computer is offline, so you're seeing a saved week of demo data.
+      The example questions still show real answers from Snowflake Cortex.</div>
+  </div>
 
   <div class="grid">
     <section class="card s12" aria-labelledby="askTitle">
@@ -119,8 +128,12 @@
   </div>
 </div>
 
+<script src="/config.js"></script>
+<script src="/teddy-api.js"></script>
 <script>
 const $ = s => document.querySelector(s);
+let DEMO = false, demoAnswers = null;
+const getJSON = async p => (await fetch(DEMO ? p.demo : TEDDY.url(p.live), { cache: 'no-store' })).json();
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const LABELS = { find_object: 'Find things', identify: "What's this?", read: 'Read to me', homework: 'Homework', cpr_coach: 'CPR',
   first_aid: 'First aid', fall_check: 'Check on me', chat: 'Chatting', dance: 'Dancing', mood_checkin: 'Mood check-in', stop: 'Stop' };
@@ -144,9 +157,10 @@ function barOrLine(id, type, labels, data, opts = {}) {
 }
 
 async function load() {
-  const s = await (await fetch('/api/stats')).json();
+  const s = await getJSON({ live: '/api/stats', demo: '/demo/stats.json' });
   $('#owner').textContent = s.owner;
-  $('#engine').innerHTML = 'Brain: <b>' + (s.engine === 'snowflake' ? 'Snowflake Cortex' : 'local mock') + '</b>';
+  $('#engine').innerHTML = DEMO ? 'Brain: <b>asleep · demo data</b>'
+    : 'Brain: <b>' + (s.engine === 'snowflake' ? 'Snowflake Cortex' : 'local mock') + '</b>';
   const moods = s.mood.filter(v => v != null);
   const lm = s.last_mood;
   $('#moodNow').textContent = lm && lm.score ? lm.score + ' / 5' : '–';
@@ -180,8 +194,15 @@ async function load() {
 async function ask(q) {
   $('#q').value = q; $('#answer').textContent = 'Thinking…'; $('#how').hidden = true;
   try {
-    const r = await (await fetch('/api/caregiver/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: q }) })).json();
+    let r;
+    if (DEMO) {
+      demoAnswers = demoAnswers || await (await fetch('/demo/answers.json')).json();
+      r = demoAnswers[q] || { answer: "Teddy is sleeping, so I can only answer the example questions right now. "
+        + "Tap one of them to see a real answer from Snowflake Cortex.", sql: null, engine: 'demo', rows: [], ms: 0 };
+      r = { ...r, engine: r.engine + ' (saved answer)' };
+    } else {
+      r = await (await TEDDY.post('/api/caregiver/ask', { question: q })).json();
+    }
     $('#answer').textContent = r.answer;
     $('#howBody').innerHTML = '<p></p><pre></pre>';
     $('#howBody p').textContent = `Engine: ${r.engine} · ${r.rows.length} rows · ${(r.ms / 1000).toFixed(1)}s` + (r.error ? ' · SQL error: ' + r.error : '');
@@ -195,7 +216,8 @@ document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () =
 let after = 0;
 async function live() {
   try {
-    const j = await (await fetch('/api/feed?after=' + after)).json();
+    if (DEMO) return;
+    const j = await (await fetch(TEDDY.url('/api/feed?after=' + after))).json();
     const box = $('#live');
     j.events.forEach(e => {
       after = Math.max(after, e.id);
@@ -213,7 +235,13 @@ async function live() {
   } catch {}
   setTimeout(live, 2000);
 }
-load(); live();
+(async () => {
+  DEMO = (await TEDDY.connect()) === null;
+  document.querySelectorAll('a[data-link]').forEach(a => a.href = TEDDY.link(a.getAttribute('href')));
+  $('#sleeping').hidden = !DEMO;
+  if (DEMO) $('#live').innerHTML = '<li class="muted">Teddy is sleeping 😴</li>';
+  load(); live();
+})();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', load);
 </script>
 </body>

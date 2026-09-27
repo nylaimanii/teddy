@@ -5,8 +5,11 @@
     python -m web.server --mock --offline   # no hardware, no internet: SQLite + Ollama brain
     python -m web.tunnel            # public URL + QR code for the iPad
 
-Teddy's screen:  http://localhost:8000/            (tap "Wake Teddy" once so the iPad can play audio)
+Teddy's screen:  http://localhost:8000/  (or /teddy; tap "Wake Teddy" once so the iPad can play audio)
 Caregiver:       http://localhost:8000/caregiver
+Landing page:    http://localhost:8000/home
+The same pages are deployed to Vercel (web/vercel-build.mjs) and call this API through the tunnel;
+CORS allows *.vercel.app and localhost, plus anything in TEDDY_CORS_ORIGINS (comma-separated).
 
 All of Teddy's speech plays on the screen: ElevenLabs audio is streamed through /api/tts/<id>;
 the page falls back to the browser's own speech if that fails. No screen open -> the Mac speaks.
@@ -25,6 +28,7 @@ from pathlib import Path
 
 import requests
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -43,6 +47,15 @@ MOODS = {"warm": (0.55, 0.35), "happy": (0.35, 0.6), "calm": (0.75, 0.15), "sad"
 
 app = FastAPI(title="Teddy")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/demo", StaticFiles(directory=STATIC / "demo"), name="demo")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in os.getenv("TEDDY_CORS_ORIGINS", "").split(",") if o.strip()],
+    allow_origin_regex=r"https://[\w.-]+\.vercel\.app|http://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+    max_age=600,
+)
 teddy: Teddy = None
 _clients = {}  # client id -> (asyncio.Queue, is_speaker)
 _loop = None
@@ -127,8 +140,27 @@ def _sleep():
 
 # ------------------------------------------------------------------ pages
 @app.get("/")
+@app.get("/teddy")
 def screen_page():
     return FileResponse(STATIC / "index.html")
+
+
+@app.get("/home")
+def landing():
+    return FileResponse(STATIC / "landing.html")
+
+
+@app.get("/teddy-api.js")
+def teddy_api_js():
+    return FileResponse(STATIC / "teddy-api.js", media_type="text/javascript")
+
+
+@app.get("/config.js")
+def config_js():
+    """On the Mac the API is this same origin (""); Vercel's build writes its own config.js."""
+    cfg = {"api": "", "video": os.getenv("TEDDY_VIDEO_URL", "")}
+    return Response(f"window.TEDDY_CONFIG = {json.dumps(cfg)};\n", media_type="text/javascript",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/caregiver")
