@@ -20,21 +20,32 @@ import time
 from collections import deque
 from fractions import Fraction
 
-from brain import screen
+from brain import flags, screen
 from brain import snowflake as sf
 from brain.mocks import MockBody, MockVision, MockVoice
 
-INTENTS = ["find_object", "identify", "read", "homework", "cpr_coach", "first_aid",
+INTENTS = ["find_object", "identify", "read", "homework", "howto", "cpr_coach", "first_aid",
            "fall_check", "chat", "dance", "mood_checkin", "story", "stop"]
+# Kid mode (the default) keeps these in the code but out of the UI and prompts; CPR still starts by voice.
+HIDDEN_FOR_KIDS = {"first_aid", "fall_check"}
 PORT = os.getenv("TEDDY_PORT")  # None -> Body auto-detects the Uno
 
-PERSONA = (
+KID_PERSONA = (
+    f"You are Teddy, a teddy bear who is a warm, chill, playful big buddy to {flags.KID_NAME}, a kid aged 5 to 10. "
+    "You talk out loud. Say one or two short sentences with simple words, like a fun older friend. Be "
+    "encouraging (\"ooh nice!\", \"you got this!\"). Never lecture, never scold, no long explanations. "
+    "Help the kid do things themselves: give a hint or a question instead of doing it for them. "
+    "No emojis, lists or markdown. If they sound hurt or scared, say let's go get a grown-up.")
+GROWNUP_PERSONA = (
     f"You are Teddy, a warm, gentle teddy bear who keeps {sf.OWNER} company. You speak out loud, so reply "
     "in one or two short sentences with simple words a six-year-old understands. Be cheerful, kind and "
     "patient. No emojis, lists or markdown. If someone sounds sad or lonely, comfort them and suggest calling "
     "someone they love. If anything sounds like an emergency, tell them to call 911 right away.")
+PERSONA = KID_PERSONA if flags.KID else GROWNUP_PERSONA
 
-HELLOS = ["Hi friend! I'm so happy to see you!", "Hello hello! I missed you!", "Hi there! Want to hang out?"]
+HELLOS = (["Hey buddy! What are we doing today?", "Oh hey! Good to see you!", "Hi hi! Wanna do something fun?"]
+          if flags.KID else
+          ["Hi friend! I'm so happy to see you!", "Hello hello! I missed you!", "Hi there! Want to hang out?"])
 
 
 # ------------------------------------------------------------------ loading real parts or mocks
@@ -83,9 +94,13 @@ def quick_intent(text):
     if re.search(r"\bcpr\b|not breathing|no pulse|heart (stopped|attack)|chest compressions|collapsed|unconscious", t):
         return {"intent": "cpr_coach"}
     if re.search(r"\bi (fell|fall|have fallen)\b|fallen|can't get up|cannot get up", t):
-        return {"intent": "fall_check"}
+        return {"intent": "grownup" if flags.KID else "fall_check"}
     if re.search(r"bleed|blood|burn|\bcut\b|chok|sting|\bbee\b|nosebleed|sprain|bump|scrape|poison|allergic", t):
-        return {"intent": "first_aid", "question": text}
+        return {"intent": "grownup"} if flags.KID else {"intent": "first_aid", "question": text}
+    if re.search(r"how (do|can|should) (i|you|we)|show me how|teach me|help me (to )?(tie|brush|draw|pack|make|wash|play)"
+                 r"|\b(tie|brush|draw|pack|wash)\b.*\b(shoe|teeth|cat|backpack|bag|hands|bed)", t) \
+            and not math_expr(t) and not re.search(r"\bcpr\b", t):
+        return {"intent": "howto", "question": text}
     if re.search(r"\bdanc", t):
         return {"intent": "dance"}
     if re.search(r"\bstory\b|\bstories\b|bedtime tale|once upon", t):
@@ -99,22 +114,25 @@ def quick_intent(text):
         return {"intent": "identify"}
     if math_expr(t) or re.search(r"homework|math|spell|science|history question", t):
         return {"intent": "homework", "question": text}
-    if re.search(r"check on me|how do i look|am i okay", t):
+    if re.search(r"check on me|how do i look|am i okay", t) and not flags.KID:
         return {"intent": "fall_check"}
     return None
 
 
 def llm_intent(text):
-    prompt = (f"Classify what the person wants from their teddy bear robot. Intents: {', '.join(INTENTS)}.\n"
+    shown = [i for i in INTENTS if not (flags.KID and i in HIDDEN_FOR_KIDS)]
+    prompt = (f"Classify what the person wants from their teddy bear robot. Intents: {', '.join(shown)}.\n"
               "find_object = where is something; identify = what is this thing; read = read text aloud; "
-              "homework = school question; cpr_coach = someone not breathing; first_aid = injury help; "
-              "fall_check = they fell or want checking on; mood_checkin = they want to talk about feelings; "
-              "story = tell a story; dance = dance; chat = anything else.\n"
+              "homework = school question; howto = learn to do something step by step (tie shoes, brush teeth, "
+              "draw, pack a bag, play a game); cpr_coach = someone not breathing; "
+              + ("" if flags.KID else "first_aid = injury help; fall_check = they fell or want checking on; ")
+              + "mood_checkin = they want to talk about feelings; story = tell a story; dance = dance; "
+              "chat = anything else.\n"
               'Reply JSON: {"intent": "...", "object": "thing to find or null", "question": "the question or null"}\n'
               f"Person said: {text}")
     try:
         out = json.loads(sf.ollama(prompt, json_mode=True, temperature=0))
-        if out.get("intent") in INTENTS:
+        if out.get("intent") in shown:
             return out
     except Exception as e:
         print(f"[teddy] intent llm failed: {e}")
@@ -335,6 +353,8 @@ class Teddy:
                     screen.show("idle")
 
     def handle(self, intent, source="phone", **args):
+        if flags.KID and intent in HIDDEN_FOR_KIDS:
+            intent = "grownup"
         fn = getattr(self, f"do_{intent}", None)
         if fn is None:
             return self.say("I'm not sure how to do that yet.")
@@ -489,6 +509,12 @@ class Teddy:
         r = self._while_saying("Good question! Let me check my books.", sf.ask_detailed, q, "homework") or {}
         screen.show("answer", title="Homework", question=q, text=r.get("text", sf.NOT_SURE), source=r.get("source"))
         return self.say(r.get("answer", sf.NOT_SURE))
+
+    def do_grownup(self, **_):
+        """Kid mode: any ouchie or scary moment -> get a grown-up (no medical talk)."""
+        sf.log_event("alert", {"status": "grownup_needed", "text": "Kid asked about getting hurt"})
+        screen.show("talk", face="caring", caption="Let's get a grown-up")
+        return self.say("Ouch! Let's go get a grown-up to help you, okay? I'll be right here.", mood="calm")
 
     def do_first_aid(self, question=None, **_):
         q = question or "basic first aid"
@@ -675,7 +701,7 @@ class Teddy:
 
     def start(self, voice=True):
         """Start the always-on loops (voice, gestures, fall watch). Returns immediately."""
-        loops = [self._gesture_loop, self._fall_loop]
+        loops = [self._gesture_loop] + ([] if flags.KID else [self._fall_loop])
         if voice and not (isinstance(self.mic, MockVoice) and not self.mic.interactive):
             loops.append(self._voice_loop)
         for fn in loops:
