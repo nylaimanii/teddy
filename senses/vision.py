@@ -38,23 +38,32 @@ VLM_DEADLINE = float(os.getenv("TEDDY_VLM_DEADLINE", 6))  # seconds before we gi
 SNAPSHOT = HERE / "snapshots" / "find.jpg"
 
 # canonical label -> YOLO-World prompt text
-TRACKED = {
-    "keys": "keys",
-    "phone": "cell phone",
-    "wallet": "wallet",
-    "glasses": "eyeglasses",
-    "remote": "remote control",
-    "water bottle": "water bottle",
-    "backpack": "backpack",
-    "book": "book",
-    "person": "person",
-}
+# (canonical label, YOLO-World prompt). A label can have several prompts; they share one label.
+TRACKED_PROMPTS = [
+    ("keys", "keys"),
+    ("phone", "cell phone"),
+    ("wallet", "wallet"),
+    ("glasses", "eyeglasses"),
+    ("remote", "remote control"),
+    ("water bottle", "water bottle"),
+    ("backpack", "backpack"),
+    ("book", "book"),
+    ("bunny", "white stuffed bunny"),
+    ("bunny", "stuffed animal"),
+    ("bunny", "plush toy"),
+    ("person", "person"),
+]
+LABELS = [label for label, _ in TRACKED_PROMPTS]
+PROMPTS = [prompt for _, prompt in TRACKED_PROMPTS]
+TRACKED = set(LABELS)
 SYNONYMS = {
     "key": "keys", "car keys": "keys", "house keys": "keys", "keychain": "keys",
     "cell phone": "phone", "cellphone": "phone", "mobile": "phone", "iphone": "phone", "smartphone": "phone",
     "purse": "wallet", "eyeglasses": "glasses", "spectacles": "glasses", "reading glasses": "glasses",
     "sunglasses": "glasses", "tv remote": "remote", "remote control": "remote", "controller": "remote",
     "bottle": "water bottle", "water": "water bottle", "cup": "water bottle",
+    "stuffed bunny": "bunny", "white stuffed animal": "bunny", "stuffed animal": "bunny", "rabbit": "bunny",
+    "bunny rabbit": "bunny", "white bunny": "bunny", "stuffed rabbit": "bunny", "plushie": "bunny",
     "bag": "backpack", "school bag": "backpack", "bookbag": "backpack", "books": "book",
 }
 DETECT_CONF = 0.15
@@ -64,6 +73,10 @@ LOG_CONF = 0.25
 NOSE, L_SH, R_SH, L_EL, R_EL, L_WR, R_WR, L_HIP, R_HIP = 0, 5, 6, 7, 8, 9, 10, 11, 12
 ARMS = {"left": (L_SH, L_EL, L_WR), "right": (R_SH, R_EL, R_WR)}
 KP_CONF = 0.35
+
+# The hat brim hangs over the bottom of the webcam view. Grey out that band on real camera frames so
+# nothing is detected in the blur. Coordinates stay full-frame, so body.look_at still lines up.
+MASK_BOTTOM = float(os.getenv("TEDDY_MASK_BOTTOM", 0))  # e.g. 0.4 if the brim droops again
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
@@ -91,7 +104,7 @@ def _world():
         if "world" not in _models:
             from ultralytics import YOLOWorld
             m = YOLOWorld(str(MODELS / "yolov8s-worldv2.pt"))
-            m.set_classes(list(TRACKED.values()))
+            m.set_classes(PROMPTS)
             _models["world"] = m
         return _models["world"], _gpu_lock
 
@@ -304,6 +317,8 @@ class Vision:
                 time.sleep(0.05)
                 continue
             fails = 0
+            if MASK_BOTTOM > 0:
+                f[int(f.shape[0] * (1 - MASK_BOTTOM)):] = 127
             with self._lock:
                 self._frame = f
         cap.release()
@@ -346,10 +361,11 @@ class Vision:
             if classes:
                 model.set_classes(classes)
             try:
-                res = model.predict(img, conf=DETECT_CONF, device=_device(), verbose=False)[0]
+                res = model.predict(img, conf=DETECT_CONF, device=_device(), verbose=False,
+                                    agnostic_nms=True)[0]  # "stuffed animal" + "plush toy" = one box
             finally:
                 if classes:
-                    model.set_classes(list(TRACKED.values()))
+                    model.set_classes(PROMPTS)
         return res
 
     @staticmethod
@@ -371,7 +387,7 @@ class Vision:
         img = self.frame()
         if img is None:
             return []
-        return self._to_dets(self._run_world(img), list(TRACKED.keys()))
+        return self._to_dets(self._run_world(img), LABELS)
 
     def find(self, query, save=True):
         """Best match for a spoken thing ("my keys", "red mug") or None.
@@ -382,7 +398,7 @@ class Vision:
         if img is None:
             return None
         if label in TRACKED:
-            hits = [d for d in self._to_dets(self._run_world(img), list(TRACKED.keys())) if d["label"] == label]
+            hits = [d for d in self._to_dets(self._run_world(img), LABELS) if d["label"] == label]
         else:  # open vocabulary: ask YOLO-World for exactly this thing
             hits = self._to_dets(self._run_world(img, classes=[label]), [label])
         if not hits:
