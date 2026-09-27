@@ -105,37 +105,35 @@ ARMS_ONE_AT_A_TIME = False   # True = left and right arms take turns too
                              # (flip this if both-arms-at-once still sags)
 
 # Camera (0..1) -> head angles. senses/ uses x to the RIGHT and y DOWN
-# (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top. The
-# camera rides in his hat facing the way he faces, so frame-left is his left.
-MIRROR_CAMERA = False   # True if senses/ ever hands us a selfie-mirrored frame
-
-# The camera rides on his HEAD, so a frame is relative to wherever he was
-# already looking -- not to his body. Facing something therefore means turning
-# by however far off-axis it sits in the frame, which is what look_at does by
-# default. Treating frame coords as absolute body angles only works when his
-# head happens to be at home, and makes repeated find->point_at calls swing
-# back and forth: once he faces the thing it sits at x=0.5, which an absolute
-# mapping reads as "return to centre".
-# Logitech C270: 60 deg diagonal on a 4:3 sensor -> 49.6 x 38.2 degrees.
+# (confirmed with Agent B), i.e. x=0 is the left edge, y=0 is the top.
+#
+# The camera is bolted to his BODY, not his head -- the hat does not turn when
+# he does. So a frame is always in body coordinates: a given x means the same
+# real-world direction no matter where his head happens to be pointing, and
+# the mapping from frame position to head angle is fixed. That is what
+# look_at/point_at do by default (relative=False).
+#
+# The scale is the camera's actual field of view, not a guess: a Logitech C270
+# is 60 deg diagonal on a 4:3 sensor -> 49.6 x 38.2 degrees, so something at
+# the very edge of frame is only ~25 deg off his centre line. The old +/-55
+# mapping turned his head twice as far as the thing actually was.
 CAMERA_FOV_X = 49.6
 CAMERA_FOV_Y = 38.2
-LOOK_GAIN = 0.9         # slightly under-turn; overshooting then correcting
-                        # looks worse than creeping up on it
+MIRROR_CAMERA = False   # True if senses/ ever hands us a selfie-mirrored frame
+LOOK_GAIN = 0.9         # deliberately under-turn by 10%; overshooting and
+                        # correcting looks worse than creeping up on it
+LOOK_SLACK = 2.0        # don't bother re-commanding a move under this many
+                        # degrees -- stops jitter from noisy detections
 
-# Relative aiming is open-loop: we turn by what the frame says and trust the
-# head to follow. When it doesn't -- a stalled pan servo, a hat that swivels
-# on his head instead of with it -- the target never leaves the same spot in
-# frame, every call asks for the same correction again, and he walks to the
-# end stop. A real target is never more than half a frame off axis (~25 deg),
-# so accumulating more than this much turn in one direction without the target
-# ever reaching the middle means the head is not actually moving.
-LOOK_CENTRED = 0.12     # |x-0.5| within this counts as "facing it"; also a
-                        # deadband, so a centred target doesn't cause jitter
+# Only used by look_at(..., relative=True), which treats the frame as an
+# offset from where his head already points. That is the right model for a
+# HEAD-mounted camera; keep it in case the camera ever moves onto the head.
+# Because each call adds to the last, it can run away if the view doesn't
+# actually change, so it carries the guard below. The default fixed mapping
+# cannot run away: it is computed from HOME every time and is structurally
+# bounded to +/-22 degrees.
+LOOK_CENTRED = 0.12     # |x-0.5| within this counts as "facing it"
 LOOK_RUNAWAY = 55.0     # degrees of same-direction turn before we call it stalled
-
-# Only used by look_at(..., relative=False), the old absolute mapping.
-LOOK_PAN = (55, -55)    # offset from neutral at x=0 (his left) and x=1
-LOOK_TILT = (35, -35)   # offset from neutral at y=0 (top, look up) and y=1
 
 MAX_SIMULTANEOUS = 3    # servos allowed to start moving on the same instant
 STAGGER = 0.05          # seconds between one batch of 3 and the next
@@ -380,16 +378,26 @@ class Body:
         return worst
 
     def _split_for_arms(self, targets):
-        """[(targets, exclusive?)] -- exclusive joints first and alone."""
-        arms, rest = {}, {}
+        """[(targets, exclusive?)] -- exclusive joints first, each alone.
+
+        The arms count as one unit (they move as a pair in most gestures), but
+        any OTHER exclusive joint gets a block of its own: the whole point is
+        that it doesn't share the pack, and that includes not sharing it with
+        the arms.
+        """
+        arms, other, rest = {}, {}, {}
         for joint, raw in targets.items():
             name = self._resolve(joint)
-            (arms if name in EXCLUSIVE_JOINTS else rest)[name] = raw
+            if name in EXCLUSIVE_JOINTS:
+                (arms if name in ARM_JOINTS else other)[name] = raw
+            else:
+                rest[name] = raw
         blocks = []
         if arms and ARMS_ONE_AT_A_TIME:
             blocks += [({j: v}, True) for j, v in arms.items()]
         elif arms:
             blocks.append((arms, True))
+        blocks += [({j: v}, True) for j, v in other.items()]
         if rest:
             blocks.append((rest, False))
         return blocks or [(dict(targets), False)]
@@ -493,26 +501,39 @@ class Body:
             print("[bear:mock] pose: %s" % name)
         return self._submit(lambda: gesture(self), interrupt)
 
-    def look_at(self, x, y, duration=0.45, interrupt=True, relative=True):
+    def look_at(self, x, y, duration=0.45, interrupt=True, relative=False):
         """Turn his head to face a spot in the camera frame (x, y in 0..1).
 
-        relative=True (the default) treats the frame as what he can see right
-        now, which is what a head-mounted camera actually gives you. Pass
-        relative=False for the old mapping that reads x, y as absolute body
-        angles regardless of where his head is.
+        The camera is fixed to his body, so the frame is in body coordinates
+        and the mapping is fixed: relative=False, the default. Pass
+        relative=True only if the camera ever moves onto his head, where a
+        frame means "relative to where I'm already looking".
         """
         def routine():
             pan, tilt = (self._head_toward(x, y) if relative
                          else self._head_for(x, y))
+            if not relative and self._within_slack(pan, tilt):
+                return True
             return self._transition({"head_pan": pan, "head_tilt": tilt}, duration)
         return self._submit(routine, interrupt)
 
     def look_toward(self, x, y, **kw):
-        """Alias for look_at(..., relative=True) -- the head-relative mapping."""
+        """look_at with the HEAD-relative mapping, for if the camera ever moves
+        onto his head. The body-mounted camera we have wants plain look_at."""
         kw["relative"] = True
         return self.look_at(x, y, **kw)
 
-    def point_at(self, x, y, interrupt=True, relative=True):
+    def _within_slack(self, pan, tilt):
+        """True if he is already looking close enough that moving would just
+        be jitter from a noisy detection."""
+        now_p = self.angles.get("head_pan")
+        now_t = self.angles.get("head_tilt")
+        if now_p is None or now_t is None:
+            return False
+        return (abs(self._safe("head_pan", pan) - now_p) < LOOK_SLACK and
+                abs(self._safe("head_tilt", tilt) - now_t) < LOOK_SLACK)
+
+    def point_at(self, x, y, interrupt=True, relative=False):
         """Face it, then raise the arm on the side it's actually on.
 
         Which arm is decided from where his head ends up relative to his BODY,
@@ -709,12 +730,14 @@ class Body:
         return pan_now + d_pan, tilt_now + d_tilt
 
     def _head_for(self, x, y):
+        """Fixed mapping: where in the world a frame position points, given a
+        body-mounted camera. Always measured from HOME, so it cannot drift."""
         x = _clamp(float(x), 0.0, 1.0)
         y = _clamp(float(y), 0.0, 1.0)
         if MIRROR_CAMERA:
             x = 1.0 - x
-        pan = HOME["head_pan"] + DIRECTION["head_pan"] * (LOOK_PAN[0] + (LOOK_PAN[1] - LOOK_PAN[0]) * x)
-        tilt = HOME["head_tilt"] + DIRECTION["head_tilt"] * (LOOK_TILT[0] + (LOOK_TILT[1] - LOOK_TILT[0]) * y)
+        pan = HOME["head_pan"] + DIRECTION["head_pan"] * (0.5 - x) * CAMERA_FOV_X * LOOK_GAIN
+        tilt = HOME["head_tilt"] + DIRECTION["head_tilt"] * (0.5 - y) * CAMERA_FOV_Y * LOOK_GAIN
         return pan, tilt
 
     def _both_arms(self, offset):

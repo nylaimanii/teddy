@@ -46,13 +46,18 @@ Notes for whoever's wiring this up:
 - All the tunables are the config block at the top of `bear.py`: `HOME`,
   `LIMITS`, `TRIM` (mechanical zero fudge), `DIRECTION` (flip a sign if a limb
   goes the wrong way), `LOOK_PAN`/`LOOK_TILT`, `MIRROR_CAMERA`.
-- **`look_at`/`point_at` are head-relative, because the camera is on his
-  head.** A frame is an offset from wherever he is already looking, so
-  `(0.5, 0.5)` means "don't move" rather than "return to centre". Turning is
-  `(0.5 - x) x CAMERA_FOV_X` (49.6 deg for the C270), damped by `LOOK_GAIN`.
-  Repeated find->point_at calls converge on the target in about two steps; the
-  old absolute mapping oscillated forever, flipping between the frame edges.
-  Pass `relative=False` for that old behaviour.
+- **`look_at`/`point_at` use a fixed mapping, because the camera is bolted to
+  his BODY** — the hat does not turn when his head does. A frame is therefore
+  always in body coordinates, so a given `x` means the same real direction
+  however his head is pointing, and the angle is computed from `HOME` every
+  time. The scale is the camera's real field of view (49.6 x 38.2 deg for the
+  C270), damped 10% by `LOOK_GAIN`, which bounds the whole mapping to +/-22
+  deg — it structurally cannot walk to an end stop. `LOOK_SLACK` suppresses
+  sub-2-degree twitches from noisy detections.
+  `relative=True` (or `look_toward()`) switches to head-relative aiming, which
+  is the right model only if the camera ever moves onto his head. That mode
+  accumulates, so it carries `LOOK_RUNAWAY`/`look_stalled` to stop it walking
+  to an end stop when the view doesn't change.
 - **Motion is tuned for a bear with stuffing in it.** Durations come from
   `MAX_DEG_PER_SEC` (520, just under the SG90's ~600) via `travel_time()`, so
   every move runs as fast as the horn can actually follow. Gesture sizes come
