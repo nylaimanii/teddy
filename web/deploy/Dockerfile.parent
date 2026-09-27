@@ -1,0 +1,12 @@
+# Teddy's Parent dashboard + API: only the cloud-facing parts (no camera, no ML).
+# Built from a staging dir made by web/deploy/vultr.py (brain/ + web/parent.py + the page).
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements-parent.txt .
+RUN pip install --no-cache-dir -r requirements-parent.txt
+COPY brain/ brain/
+COPY web/ web/
+ENV PYTHONUNBUFFERED=1 TEDDY_AUDIENCE=kid
+EXPOSE 8080
+USER nobody
+CMD ["uvicorn", "web.parent:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
