@@ -135,6 +135,11 @@ LOOK_SLACK = 2.0        # don't bother re-commanding a move under this many
 LOOK_CENTRED = 0.12     # |x-0.5| within this counts as "facing it"
 LOOK_RUNAWAY = 55.0     # degrees of same-direction turn before we call it stalled
 
+# Inside the fabric every move is small, so a pose has to SIT there to be read
+# from across a table. Transitions stay fast -- it's the holds that are long.
+POSE_HOLD = 1.4         # seconds a static pose rests before handing back
+HOLD_LONG = 2.0         # for the ones that are the point of the interaction
+
 MAX_SIMULTANEOUS = 3    # servos allowed to start moving on the same instant
 STAGGER = 0.05          # seconds between one batch of 3 and the next
 
@@ -329,7 +334,7 @@ class Body:
             return False
         return self._transition(targets, settle)
 
-    def _transition(self, targets, duration=0.5, strict=False):
+    def _transition(self, targets, duration=0.5, strict=False, split=None):
         """Ease every joint in `targets` to its target, giving the arms the
         power pack to themselves.
 
@@ -341,30 +346,35 @@ class Body:
         strict=True keeps the total inside `duration` and skips the hold, for
         callers whose timing is the point (cpr_beat's metronome).
         """
-        if not ARM_EXCLUSIVE:
+        # split=False: move everything together anyway. Worth it for slow,
+        # gentle motion (breathe), where the servos are barely loaded and
+        # sequencing would turn one breath into two separate movements.
+        if split is False or not ARM_EXCLUSIVE:
             return self._move_block(targets, duration)
 
         blocks = self._split_for_arms(targets)
         if len(blocks) == 1 and not (blocks[0][1] and ARM_SETTLE):
             return self._move_block(blocks[0][0], duration)
 
-        if strict:
-            # Divide the caller's budget by how far each block has to travel,
-            # so the beat lands exactly where it would have.
-            spans = [max(1, self._span(t)) for t, _ in blocks]
-            total = float(sum(spans))
-            for (chunk, _), span in zip(blocks, spans):
-                if not self._move_block(chunk, max(0.02, duration * span / total)):
+        # Share the caller's budget out by how far each block has to travel,
+        # so splitting a move into blocks doesn't change how long it takes.
+        spans = [max(1, self._span(chunk)) for chunk, _ in blocks]
+        total = float(sum(spans))
+        for (chunk, exclusive), span in zip(blocks, spans):
+            want = duration * span / total
+            if strict:
+                # The caller's timing is the point (cpr_beat's metronome):
+                # keep the total, even if that means driving hard.
+                block_time = max(0.02, want)
+            else:
+                # Never slower than asked, never faster than the horn can
+                # follow. A deliberately slow move stays slow.
+                block_time = max(want, span / MAX_DEG_PER_SEC)
+            if not self._move_block(chunk, block_time):
+                return False
+            if not strict and exclusive and ARM_SETTLE:
+                if not self._sleep(ARM_SETTLE):
                     return False
-            return True
-
-        for chunk, is_arm in blocks:
-            span = self._span(chunk)
-            if not self._move_block(chunk, max(MIN_DURATION,
-                                               span / MAX_DEG_PER_SEC)):
-                return False
-            if is_arm and ARM_SETTLE and not self._sleep(ARM_SETTLE):
-                return False
         return True
 
     def _span(self, targets):
@@ -561,6 +571,17 @@ class Body:
             self._snap({near: HOME[near]})
 
         return self._submit(routine, interrupt)
+
+    def found_it(self, x=None, y=None, interrupt=True):
+        """Face the thing, then raise that arm high and hold it.
+
+        bear.found_it(x, y) looks first; bear.found_it() assumes he is already
+        looking at it (same as pose("found_it")).
+        """
+        if x is not None:
+            self.look_at(x, 0.5 if y is None else y, interrupt=interrupt)
+            return self.pose("found_it", interrupt=False)
+        return self.pose("found_it", interrupt=interrupt)
 
     def dance(self, seconds=10, interrupt=True):
         """Ten seconds of waves: arms, then legs, then head, then all of him."""
@@ -932,15 +953,160 @@ def _g_listen(b):
     b._snap({"head_pan": b.reach("head_pan", 0.85)}, scale=4.0)
 
 
+def _g_asleep(b):
+    # Chin down, arms hanging, head lolled a little to one side.
+    b._snap({"head_tilt": b.reach("head_tilt", -0.45),
+             "head_pan": b.reach("head_pan", -0.18)}, scale=2.8)
+    b._snap({"arm_l": HOME["arm_l"], "arm_r": HOME["arm_r"]}, scale=2.5)
+    b._sleep(HOLD_LONG)
+
+
+def _g_woke_up(b):
+    # Head snaps up, then two quick lifts of both arms -- a startle.
+    b._overshoot({"head_tilt": b.reach("head_tilt", 0.95),
+                  "head_pan": HOME["head_pan"]}, past=12)
+    for _ in range(2):
+        if not b._snap(b._both_arms_reach(-1.0)):
+            return
+        if not b._snap(b._both_arms_reach(-0.15)):
+            return
+    b._snap(dict(b._both_arms_reach(-0.35),
+                 head_tilt=b.reach("head_tilt", 0.7)))
+    b._sleep(POSE_HOLD)
+
+
+def _g_listening(b):
+    # Ear cocked right over and HELD -- the stillness is what reads as
+    # attention, so this one just sits there.
+    b._snap({"head_tilt": b.reach("head_tilt", 0.5),
+             "head_pan": b.reach("head_pan", 0.75)})
+    b._snap({"arm_l": b.reach("arm_l", 0.25), "arm_r": b.reach("arm_r", 0.25)})
+    b._sleep(HOLD_LONG)
+
+
+def _g_thinking(b):
+    # Slow sweep side to side, twice over, with a paw up.
+    b._snap({"head_tilt": b.reach("head_tilt", 0.4),
+             "arm_r": b.reach("arm_r", -0.7)})
+    for _ in range(2):
+        if not b._snap({"head_pan": b.reach("head_pan", 0.8)}, scale=6.0):
+            return
+        if not b._sleep(0.35):
+            return
+        if not b._snap({"head_pan": b.reach("head_pan", -0.8)}, scale=6.0):
+            return
+        if not b._sleep(0.35):
+            return
+    b._snap({"head_pan": HOME["head_pan"]}, scale=3.0)
+
+
+def _g_found_it(b):
+    """Arm up on the side he is already looking, held so it lands.
+
+    Call look_at()/point_at() first, or use bear.found_it(x, y), which does
+    the looking for you.
+    """
+    pan = b.angles.get("head_pan") or HOME["head_pan"]
+    his_left = (pan - HOME["head_pan"]) * DIRECTION["head_pan"] >= 0
+    near = "arm_l" if his_left else "arm_r"
+    far = "arm_r" if near == "arm_l" else "arm_l"
+    b._snap({far: HOME[far]})
+    b._overshoot({near: b.reach(near, -1.0)}, past=10)   # arm as high as it goes
+    b._sleep(HOLD_LONG)
+    b._snap({near: HOME[near]}, scale=1.8)
+
+
+def _g_nod(b):
+    # One deliberate nod, for ticking off a how-to step.
+    start = b.angles.get("head_tilt") or HOME["head_tilt"]
+    b._snap({"head_tilt": b.reach("head_tilt", -0.5)})
+    b._sleep(0.25)
+    b._overshoot({"head_tilt": start}, past=10)
+    b._sleep(POSE_HOLD)
+
+
+def _g_celebrate(b):
+    # Both arms up and a little dance -- about three seconds of it.
+    end = time.monotonic() + 3.0
+    b._snap(dict(b._both_arms_reach(-1.0),
+                 head_tilt=b.reach("head_tilt", 0.9)))
+    i = 0
+    while time.monotonic() < end:
+        f = 1.0 if i % 2 == 0 else -1.0
+        if not b._snap({"head_pan": b.reach("head_pan", 0.7 * f)}):
+            return
+        if not b._snap(b._both_arms_reach(-0.45 if i % 2 == 0 else -1.0)):
+            return
+        if not b._snap({"leg_%s_kick" % ("l" if i % 2 == 0 else "r"):
+                        b.reach("leg_%s_kick" % ("l" if i % 2 == 0 else "r"), 0.8)}):
+            return
+        i += 1
+    b._overshoot(dict(b._both_arms_reach(-1.0),
+                      head_pan=HOME["head_pan"],
+                      head_tilt=b.reach("head_tilt", 0.9)), past=15)
+    b._sleep(POSE_HOLD)
+
+
+def _g_reading(b):
+    # Head dips toward whatever he is being shown, and stays down to study it.
+    b._snap({"head_tilt": b.reach("head_tilt", -0.55),
+             "head_pan": b.reach("head_pan", 0.12)}, scale=2.0)
+    b._sleep(HOLD_LONG)
+
+
+def _g_breathe(b):
+    """Four seconds up, four seconds down, over and over until stopped.
+
+    For helping a kid slow their breathing -- they breathe along with him, so
+    the timing is the point. Loops until stop() or another pose interrupts.
+
+    The arms swing through their long travel rather than the short stretch
+    above home: from home they only have about 20 degrees of lift, which
+    disappears inside the stuffing, but nearly 70 degrees below it.
+    Arms and head move together here (split=False) -- at this speed they are
+    barely loaded, and splitting them would turn one breath into two moves.
+    """
+    low = dict(b._both_arms_reach(0.55), head_tilt=b.reach("head_tilt", -0.35))
+    high = dict(b._both_arms_reach(-1.0), head_tilt=b.reach("head_tilt", 0.85))
+
+    b._transition(low, 2.0, split=False)
+    while True:
+        if not b._transition(high, 4.0, split=False):   # breathe in
+            return
+        if not b._sleep(0.4):                           # hold at the top
+            return
+        if not b._transition(low, 4.0, split=False):    # breathe out
+            return
+        if not b._sleep(0.6):
+            return
+
+
 _GESTURES = {
+    # the original set (CONTRACTS.md)
     "neutral": _g_neutral,
     "wave": _g_wave,
-    "think": _g_think,
+    "think": _g_thinking,
     "happy": _g_happy,
     "sad": _g_sad,
     "alert": _g_alert,
-    "listen": _g_listen,
+    "listen": _g_listening,
+    # one per behaviour, for brain/ to call by name
+    "asleep": _g_asleep,
+    "woke_up": _g_woke_up,
+    "listening": _g_listening,
+    "thinking": _g_thinking,
+    "found_it": _g_found_it,
+    "nod": _g_nod,
+    "celebrate": _g_celebrate,
+    "reading": _g_reading,
+    "breathe": _g_breathe,
 }
+
+# Friendlier names for the same things, so brain/ can use whichever reads best.
+_GESTURES["wake"] = _GESTURES["woke_up"]
+_GESTURES["step"] = _GESTURES["nod"]
+_GESTURES["got_it"] = _GESTURES["celebrate"]
+_GESTURES["calm"] = _GESTURES["breathe"]
 
 POSES = sorted(_GESTURES)
 

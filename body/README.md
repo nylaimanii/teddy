@@ -30,7 +30,28 @@ Bench tool for fitting horns — centers and holds until ctrl-c:
 .venv/bin/python body/servo.py head_pan 40  # one joint to one angle, hold
 ```
 
-Poses: `neutral wave think happy sad alert listen`.
+Poses — one per behaviour, so `brain/` can call them by name:
+
+| pose | what he does | ~time |
+|---|---|---|
+| `asleep` | chin down, arms hanging, head lolled | 2.6s |
+| `woke_up` / `wake` | head snaps up, two quick arm lifts | 2.9s |
+| `listening` / `listen` | ear cocked over, held still | 2.3s |
+| `thinking` / `think` | slow sweep side to side, paw up | 6.3s |
+| `found_it` | that arm up as high as it goes, held 2s | 3.0s |
+| `nod` / `step` | one deliberate nod, for a how-to step | 1.9s |
+| `celebrate` / `got_it` | arms up + little dance | 5.3s |
+| `reading` | head dips toward the item and stays down | 2.3s |
+| `breathe` / `calm` | 4s in, 4s out, **loops until stopped** | — |
+| `neutral` `wave` `happy` `sad` `alert` | the originals | |
+
+`found_it` raises the arm on the side he is already facing, so look first —
+or call `bear.found_it(x, y)`, which does the looking for you.
+
+`breathe` runs until `bear.stop()` or another pose interrupts it.
+
+Poses hold their final position (`POSE_HOLD`/`HOLD_LONG`) so they read from
+across a table. Transitions stay fast; it's the holds that are long.
 
 Check which way every joint goes — one joint at a time, named as it moves:
 
