@@ -85,15 +85,44 @@ def _voice_sink(audio, mime, text, mood):
 
 @app.on_event("startup")
 def _boot():
-    global teddy, _loop
+    """Serve pages right away; the bear (camera, YOLO, Whisper, serial) wakes up in the background."""
+    global _loop
     _loop = asyncio.get_event_loop()
     sf.configure(mock=True if OFFLINE else None)
     screen.set_speaker_counter(_speakers)
     screen.subscribe(_broadcast)
     sf.on_event(lambda ev: _broadcast({"type": "event", **ev}))
-    teddy = Teddy(mock=MOCK, screen_voice=True).start(voice=os.getenv("TEDDY_VOICE", "1") == "1")
-    if hasattr(teddy.mic, "set_sink"):
-        teddy.mic.set_sink(_voice_sink)
+    screen.show("think", caption="Teddy is waking up…")
+    threading.Thread(target=_wake, daemon=True, name="teddy-wake").start()
+
+
+def _wake():
+    global teddy
+    t0 = time.time()
+    try:
+        t = Teddy(mock=MOCK, screen_voice=True).start(voice=os.getenv("TEDDY_VOICE", "1") == "1")
+        if hasattr(t.mic, "set_sink"):
+            t.mic.set_sink(_voice_sink)
+        teddy = t
+        print(f"[web] Teddy is awake ({time.time() - t0:.0f}s)", flush=True)
+        screen.show("idle")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        screen.show("think", caption=f"Teddy couldn't wake up: {e}")
+
+
+def _bear():
+    if teddy is None:
+        raise HTTPException(503, "Teddy is still waking up")
+    return teddy
+
+
+@app.on_event("shutdown")
+def _sleep():
+    """Let go of the serial port, camera and mic so the next run (or body/check.py) can have them."""
+    if teddy:
+        teddy.close()
 
 
 # ------------------------------------------------------------------ pages
@@ -232,19 +261,19 @@ def action(a: Action):
     if a.intent not in INTENTS:
         raise HTTPException(400, f"unknown intent {a.intent}")
     args = {k: v for k, v in {"object": a.object, "question": a.question}.items() if v}
-    teddy.submit(a.intent, "phone", **args)
+    _bear().submit(a.intent, "phone", **args)
     return {"ok": True, "intent": a.intent}
 
 
 @app.post("/api/say")
 def say(t: Text):
-    return teddy.hear(t.text, "phone") or {"ignored": True}
+    return _bear().hear(t.text, "phone") or {"ignored": True}
 
 
 @app.post("/api/gesture")
 def gesture(g: Gesture):
     """Lets the demo fake a camera gesture from the screen."""
-    return teddy.on_gesture(g.model_dump(), "phone") or {"ignored": True}
+    return _bear().on_gesture(g.model_dump(), "phone") or {"ignored": True}
 
 
 @app.get("/api/state")
@@ -275,7 +304,7 @@ def ask(q: Question):
 @app.get("/api/health")
 def health():
     b = sf.backend()
-    return {"ok": True, "brain": b.name, "cortex_model": getattr(b, "model", None), "mock": MOCK,
+    return {"ok": True, "awake": teddy is not None, "brain": b.name, "cortex_model": getattr(b, "model", None), "mock": MOCK,
             "screens": len(_clients), "speakers": _speakers()}
 
 
@@ -283,3 +312,6 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+    # Skip interpreter teardown: PortAudio's atexit hook can deadlock against a mic thread mid-recording,
+    # leaving a zombie that holds the Arduino's serial port. Everything was released in _sleep().
+    os._exit(0)

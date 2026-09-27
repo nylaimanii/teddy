@@ -197,6 +197,7 @@ class Teddy:
         self._last_spoke = 0
         self._last_gesture = {}
         self._fall_cooldown = 0
+        self._running = True
         threading.Thread(target=self._worker, daemon=True, name="teddy-actions").start()
 
     # ---- I/O helpers
@@ -363,7 +364,11 @@ class Teddy:
                 return self.say("Okay, just ask me when you need something found.")
         it, they = ("them", "are") if _plural(obj) else ("it", "is")
         screen.show("find", object=obj, status="looking", caption=f"Looking for your {obj}…")
-        self._safe(self.body.pose, "think")
+        # The camera rides in his hat: find() must see the room from the neutral head pose, because
+        # point_at() maps camera x,y as if the head were centred.
+        self._safe(self.body.pose, "neutral")
+        self._body_wait(2)
+        time.sleep(0.3)  # let the next camera frame catch up with the head
         hit = self._while_saying(f"Let me look for your {obj}!", self.vision.find, obj)
         if hit:
             x, y, w, h = hit["x"], hit["y"], hit.get("w"), hit.get("h")
@@ -613,7 +618,7 @@ class Teddy:
     # ---- background loops
     def _voice_loop(self):
         self._voice_loop_on = True
-        while True:
+        while self._running:
             t0 = time.time()
             try:
                 text = self.mic.listen(5)
@@ -632,7 +637,7 @@ class Teddy:
                 self.hear(text, "voice")
 
     def _gesture_loop(self):
-        while True:
+        while self._running:
             try:
                 if not self._talking:
                     self.on_gesture(self.vision.gestures())
@@ -642,7 +647,7 @@ class Teddy:
             time.sleep(0.25)
 
     def _fall_loop(self):
-        while True:
+        while self._running:
             time.sleep(2)
             try:
                 if time.time() > self._fall_cooldown and self.vision.person_fallen():
@@ -651,6 +656,22 @@ class Teddy:
             except Exception as e:
                 print(f"[teddy] fall watch failed: {e}")
                 time.sleep(5)
+
+    def close(self):
+        """Stop the loops and release hardware (serial port, mic)."""
+        self._running = False
+        self._stop.set()
+        screen.hush()
+        self._safe(self.body.stop)
+        if hasattr(self.body, "close"):
+            self._safe(self.body.close)
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:
+            pass
+        if hasattr(self.vision, "close"):
+            self._safe(self.vision.close)
 
     def start(self, voice=True):
         """Start the always-on loops (voice, gestures, fall watch). Returns immediately."""
